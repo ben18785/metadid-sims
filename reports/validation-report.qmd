@@ -1,0 +1,172 @@
+---
+title: "metadid Simulation Validation Report"
+author: "metadid-sims pipeline"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    embed-resources: true
+execute:
+  echo: true
+  warning: false
+---
+
+```{r setup}
+library(targets)
+library(dplyr)
+library(ggplot2)
+library(knitr)
+
+tar_source("R/scenarios.R")
+tar_source("R/plots.R")
+
+all_agg <- tar_read(all_agg)
+all_rep <- tar_read(all_rep)
+```
+
+## Executive Summary
+
+```{r exec-summary}
+# Flag scenarios with empirical coverage below 80% for the treatment effect
+poor_coverage <- all_agg |>
+  filter(parameter == "treatment_effect_mean", empirical_coverage < 0.80)
+
+convergence_issues <- all_agg |>
+  filter(parameter == "treatment_effect_mean", pct_rhat_bad > 0.10)
+```
+
+**`r nrow(all_agg |> distinct(scenario_id))`** scenarios evaluated across
+**`r max(all_agg$n_reps, na.rm = TRUE)`** replications each.
+
+`r if (nrow(poor_coverage) == 0) "All scenarios achieved ≥80% empirical coverage for the treatment effect mean." else paste0(nrow(poor_coverage), " scenario(s) had coverage below 80% for the treatment effect mean.")`
+
+`r if (nrow(convergence_issues) == 0) "No convergence issues detected (all scenarios had <10% of fits with Rhat > 1.05)." else paste0(nrow(convergence_issues), " scenario(s) had >10% of fits with convergence warnings.")`
+
+```{r poor-coverage-table}
+#| eval: !expr nrow(poor_coverage) > 0
+kable(
+  poor_coverage |>
+    left_join(
+      tibble(
+        scenario_id = names(SCENARIO_CONFIGS),
+        description = purrr::map_chr(SCENARIO_CONFIGS, "description")
+      ),
+      by = "scenario_id"
+    ) |>
+    select(scenario_id, description, model_label, empirical_coverage, mean_bias, rmse),
+  digits = 3,
+  caption = "Scenarios with <80% coverage for treatment_effect_mean"
+)
+```
+
+## A. Calibration Studies
+
+```{r a-coverage}
+plot_coverage(all_agg, category = "A")
+```
+
+```{r a-bias}
+plot_bias(all_rep, category = "A")
+```
+
+```{r a-table}
+all_agg |>
+  filter(grepl("^A", scenario_id)) |>
+  select(scenario_id, model_label, parameter,
+         empirical_coverage, mean_bias, rmse, mean_ci_width) |>
+  kable(digits = 3, caption = "Category A: Calibration results")
+```
+
+## F. Large-N Bias Probes
+
+```{r f-coverage}
+plot_coverage(all_agg, category = "F")
+```
+
+```{r f-bias}
+plot_bias(all_rep, category = "F")
+```
+
+```{r f-table}
+all_agg |>
+  filter(grepl("^F", scenario_id)) |>
+  select(scenario_id, model_label, parameter,
+         empirical_coverage, mean_bias, rmse, mean_ci_width) |>
+  kable(digits = 3, caption = "Category F: Large-N bias probe results")
+```
+
+## B. Comparative Studies
+
+```{r b-comparison}
+plot_comparison(all_rep |> filter(grepl("^B", scenario_id)))
+```
+
+```{r b-table}
+all_agg |>
+  filter(grepl("^B", scenario_id)) |>
+  select(scenario_id, model_label, parameter,
+         empirical_coverage, mean_bias, rmse) |>
+  kable(digits = 3, caption = "Category B: Model comparison results")
+```
+
+## C. Outlier and Heavy-Tailed Studies
+
+```{r c-comparison}
+plot_comparison(all_rep |> filter(grepl("^C", scenario_id)))
+```
+
+```{r c-table}
+all_agg |>
+  filter(grepl("^C", scenario_id)) |>
+  select(scenario_id, model_label, parameter,
+         empirical_coverage, mean_bias, rmse) |>
+  kable(digits = 3, caption = "Category C: Outlier/heavy-tail results")
+```
+
+## D. Assumption Violation Studies
+
+```{r d-coverage}
+plot_coverage(all_agg, category = "D")
+```
+
+```{r d-bias}
+plot_bias(all_rep, category = "D")
+```
+
+```{r d-table}
+all_agg |>
+  filter(grepl("^D", scenario_id)) |>
+  select(scenario_id, model_label, parameter,
+         empirical_coverage, mean_bias, rmse) |>
+  kable(digits = 3, caption = "Category D: Assumption violation results")
+```
+
+## E. Edge Cases
+
+```{r e-coverage}
+plot_coverage(all_agg, category = "E")
+```
+
+```{r e-table}
+all_agg |>
+  filter(grepl("^E", scenario_id)) |>
+  select(scenario_id, model_label, parameter,
+         empirical_coverage, mean_bias, rmse) |>
+  kable(digits = 3, caption = "Category E: Edge case results")
+```
+
+## Convergence Diagnostics
+
+```{r convergence}
+plot_convergence(all_agg)
+```
+
+## Full Results Table
+
+```{r full-table}
+all_agg |>
+  arrange(scenario_id, model_label, parameter) |>
+  kable(digits = 3, caption = "All aggregated results")
+```

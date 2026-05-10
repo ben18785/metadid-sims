@@ -1,0 +1,10 @@
+_targets/
+output/
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+*.Rproj
+reports/validation-report_files/
+reports/validation-report.html
+.DS_Store
