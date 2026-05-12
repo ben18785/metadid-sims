@@ -83,7 +83,9 @@ scenario_summary_table("A") |>
 #| fig-height: 9
 #| column: screen
 #| out-width: "100%"
-plot_diagnostics(all_rep, all_agg, scenario_lookup_tbl, "A")
+A_combined    <- tar_read(A_combined)
+A_agg_combined <- tar_read(A_agg_combined)
+plot_diagnostics(A_combined, A_agg_combined, scenario_lookup_tbl, "A")
 ```
 
 ```{r a-table}
@@ -103,7 +105,9 @@ scenario_summary_table("F") |>
 #| fig-height: 7
 #| column: screen
 #| out-width: "100%"
-plot_diagnostics(all_rep, all_agg, scenario_lookup_tbl, "F")
+F_combined     <- tar_read(F_combined)
+F_agg_combined <- tar_read(F_agg_combined)
+plot_diagnostics(F_combined, F_agg_combined, scenario_lookup_tbl, "F")
 ```
 
 ```{r f-table}

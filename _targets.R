@@ -30,6 +30,8 @@ N_REPS <- 25L
 tar_source("R/scenarios.R")
 tar_source("R/simulate.R")
 tar_source("R/fit.R")
+tar_source("R/fit_g.R")
+tar_source("R/fit_robust.R")
 tar_source("R/assess.R")
 tar_source("R/plots.R")
 
@@ -56,6 +58,24 @@ list(
   ),
   tar_target(A_agg, aggregate_scenario(A_rep)),
 
+  # ---- Category A: Robust comparator (new fits, does not invalidate A_rep) ----
+  tarchetypes::tar_map_rep(
+    name    = A_rep_robust,
+    command = run_robust_rep(scenario_id, targets::tar_seed_get(), metadid_src),
+    values  = tibble::tibble(scenario_id = scenario_ids("A")),
+    names   = tidyselect::any_of("scenario_id"),
+    batches = N_REPS,
+    reps    = 1
+  ),
+  tar_target(
+    A_combined,
+    dplyr::bind_rows(
+      dplyr::mutate(A_rep,        model_label = "normal"),
+      dplyr::mutate(A_rep_robust, model_label = "robust")
+    )
+  ),
+  tar_target(A_agg_combined, aggregate_scenario(A_combined)),
+
   # ---- Category F: Large-N bias probes ----
   tarchetypes::tar_map_rep(
     name    = F_rep,
@@ -66,6 +86,24 @@ list(
     reps    = 1
   ),
   tar_target(F_agg, aggregate_scenario(F_rep)),
+
+  # ---- Category F: Robust comparator (new fits, does not invalidate F_rep) ----
+  tarchetypes::tar_map_rep(
+    name    = F_rep_robust,
+    command = run_robust_rep(scenario_id, targets::tar_seed_get(), metadid_src),
+    values  = tibble::tibble(scenario_id = scenario_ids("F")),
+    names   = tidyselect::any_of("scenario_id"),
+    batches = N_REPS,
+    reps    = 1
+  ),
+  tar_target(
+    F_combined,
+    dplyr::bind_rows(
+      dplyr::mutate(F_rep,        model_label = "normal"),
+      dplyr::mutate(F_rep_robust, model_label = "robust")
+    )
+  ),
+  tar_target(F_agg_combined, aggregate_scenario(F_combined)),
 
   # ---- Category B: Comparative studies ----
   tarchetypes::tar_map_rep(
@@ -114,8 +152,21 @@ list(
   # ---- Scenario lookup table ----
   tar_target(scenario_lookup_tbl, scenario_lookup()),
 
+  # ---- Category G: Bias source investigation ----
+  # Uses run_g_rep() (from fit_g.R) rather than run_one_rep() so that changes
+  # to the priors-aware fitting code do not invalidate A-F targets.
+  tarchetypes::tar_map_rep(
+    name    = G_rep,
+    command = run_g_rep(scenario_id, targets::tar_seed_get(), metadid_src),
+    values  = tibble::tibble(scenario_id = scenario_ids("G")),
+    batches = 5L,
+    reps    = 5L
+  ),
+  tar_target(G_agg, aggregate_scenario(G_rep)),
+
   # ---- Diagnostic plots (% bias, coverage, Rhat) per category ----
   tar_target(diag_plot_A, plot_diagnostics(A_rep, A_agg, scenario_lookup_tbl, "A")),
+  tar_target(diag_plot_G, plot_diagnostics(G_rep, G_agg, scenario_lookup_tbl, "G")),
   tar_target(diag_plot_F, plot_diagnostics(F_rep, F_agg, scenario_lookup_tbl, "F")),
   tar_target(diag_plot_B, plot_diagnostics(B_rep, B_agg, scenario_lookup_tbl, "B")),
   tar_target(diag_plot_C, plot_diagnostics(C_rep, C_agg, scenario_lookup_tbl, "C")),
@@ -125,12 +176,12 @@ list(
   # ---- Combined results ----
   tar_target(
     all_agg,
-    dplyr::bind_rows(A_agg, F_agg, B_agg, C_agg, D_agg, E_agg)
+    dplyr::bind_rows(A_agg, F_agg, B_agg, C_agg, D_agg, E_agg, G_agg)
   ),
 
   tar_target(
     all_rep,
-    dplyr::bind_rows(A_rep, F_rep, B_rep, C_rep, D_rep, E_rep)
+    dplyr::bind_rows(A_rep, F_rep, B_rep, C_rep, D_rep, E_rep, G_rep)
   ),
 
   # ---- Machine-readable exports ----

@@ -364,6 +364,10 @@ SCENARIO_CONFIGS <- list(
       bespoke_fn = "simulate_t_likelihood",
       n_did      = 20L,
       within_df  = 5
+    ),
+    compare = list(
+      list(label = "normal", fn = "meta_did", robust_heterogeneity = FALSE),
+      list(label = "robust", fn = "meta_did", robust_heterogeneity = TRUE)
     )
   ),
 
@@ -421,6 +425,10 @@ SCENARIO_CONFIGS <- list(
       bespoke_fn = "simulate_t_trends",
       n_did      = 20L,
       trend_df   = 3
+    ),
+    compare = list(
+      list(label = "normal", fn = "meta_did", robust_heterogeneity = FALSE),
+      list(label = "robust", fn = "meta_did", robust_heterogeneity = TRUE)
     )
   ),
 
@@ -557,6 +565,102 @@ SCENARIO_CONFIGS <- list(
   A18 = scenario(
     "Both positive: true_effect = +0.15, trend = +0.04",
     dgp = list(true_effect = 0.15, true_trend = 0.04)
+  ),
+
+  # ---------------------------------------------------------------------------
+  # Category G: Bias source investigation
+  #
+  # G1-G5: Prior sensitivity (unnormalised, 20 DiD = same DGP as A9).
+  #   Tests whether positive bias in unnormalised scenarios stems from
+  #   prior shrinkage on treatment_effect_mean and time_trend_mean.
+  #   Both priors widened together; if shrinkage is the cause, bias
+  #   should diminish monotonically as prior sd increases.
+  #
+  # G6-G9: Jensen's inequality (normalised, 200 DiD — large N for sensitivity).
+  #   Tests whether the negative bias in normalised scenarios arises from
+  #   the ratio estimator: E[theta/baseline] != E[theta]/E[baseline].
+  #   G6-G8 vary between-study baseline variation (baseline_sd).
+  #   G9 tests within-study precision via a very large control group.
+  # ---------------------------------------------------------------------------
+
+  G1 = scenario(
+    "Prior sensitivity: effect/trend prior sd = 1 (unnormalised, 20 DiD)",
+    dgp = list(),
+    fit = list(
+      normalise_by_baseline = FALSE,
+      priors = metadid::set_priors(
+        treatment_effect_mean = metadid::normal(0, 1),
+        time_trend_mean       = metadid::normal(0, 1)
+      )
+    )
+  ),
+
+  G2 = scenario(
+    "Prior sensitivity: effect/trend prior sd = 5 (unnormalised, 20 DiD)",
+    dgp = list(),
+    fit = list(
+      normalise_by_baseline = FALSE,
+      priors = metadid::set_priors(
+        treatment_effect_mean = metadid::normal(0, 5),
+        time_trend_mean       = metadid::normal(0, 5)
+      )
+    )
+  ),
+
+  G3 = scenario(
+    "Prior sensitivity: effect/trend prior sd = 10 (default, unnormalised, 20 DiD)",
+    dgp = list(),
+    fit = list(
+      normalise_by_baseline = FALSE,
+      priors = metadid::set_priors(
+        treatment_effect_mean = metadid::normal(0, 10),
+        time_trend_mean       = metadid::normal(0, 10)
+      )
+    )
+  ),
+
+  G4 = scenario(
+    "Prior sensitivity: effect/trend prior sd = 50 (unnormalised, 20 DiD)",
+    dgp = list(),
+    fit = list(
+      normalise_by_baseline = FALSE,
+      priors = metadid::set_priors(
+        treatment_effect_mean = metadid::normal(0, 50),
+        time_trend_mean       = metadid::normal(0, 50)
+      )
+    )
+  ),
+
+  G5 = scenario(
+    "Prior sensitivity: effect/trend prior sd = 100 (unnormalised, 20 DiD)",
+    dgp = list(),
+    fit = list(
+      normalise_by_baseline = FALSE,
+      priors = metadid::set_priors(
+        treatment_effect_mean = metadid::normal(0, 100),
+        time_trend_mean       = metadid::normal(0, 100)
+      )
+    )
+  ),
+
+  G6 = scenario(
+    "Jensen's test: baseline_sd = 0, no between-study variation (200 DiD)",
+    dgp = list(n_did = 200L, baseline_sd = 0)
+  ),
+
+  G7 = scenario(
+    "Jensen's test: baseline_sd = 0.01, reduced variation (200 DiD)",
+    dgp = list(n_did = 200L, baseline_sd = 0.01)
+  ),
+
+  G8 = scenario(
+    "Jensen's test: baseline_sd = 0.10, amplified variation (200 DiD)",
+    dgp = list(n_did = 200L, baseline_sd = 0.10)
+  ),
+
+  G9 = scenario(
+    "Jensen's test: n_control = 5000, high within-study precision (200 DiD)",
+    dgp = list(n_did = 200L, n_control = 5000L)
   )
 )
 
