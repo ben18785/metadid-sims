@@ -2,6 +2,8 @@
 
 library(ggplot2)
 library(dplyr)
+library(gridExtra)
+library(kableExtra)
 
 # ===========================================================================
 # Coverage calibration plot
@@ -103,6 +105,168 @@ plot_rmse <- function(agg_results, param = "treatment_effect_mean") {
 # ===========================================================================
 # Convergence diagnostic plot
 # ===========================================================================
+
+# ===========================================================================
+# Three-panel diagnostic plot (% bias, coverage, Rhat)
+# ===========================================================================
+
+#' Three-panel diagnostic plot: % bias, coverage, and Rhat across replicates
+#'
+#' @param rep_results  Per-replication results (stacked assess_one outputs)
+#' @param agg_results  Aggregated results from aggregate_scenario()
+#' @param lookup       Scenario lookup table from scenario_lookup()
+#' @param category     Character prefix to filter scenarios (e.g., "F")
+#' @param param        Parameter to plot (default: "treatment_effect_mean")
+plot_diagnostics <- function(rep_results, agg_results, lookup,
+                             category, param = "treatment_effect_mean",
+                             exclude = NULL) {
+
+  cat_pattern <- paste0("^", category, "\\d")
+
+  label_data <- lookup |>
+    filter(grepl(cat_pattern, scenario_id)) |>
+    mutate(
+      label = paste0(scenario_id, ": ", stringr::str_wrap(description, 35)),
+      # Natural numeric ordering: A1, A2, ..., A10, A11
+      label = forcats::fct_reorder(
+        label,
+        stringr::str_extract(scenario_id, "\\d+") |> as.integer(),
+        .desc = TRUE
+      )
+    )
+
+  # Normalise model labels per scenario: single-model scenarios get NA so they
+  # plot without colour; comparison scenarios retain their named labels.
+  normalise_labels <- function(df) {
+    df |>
+      group_by(scenario_id) |>
+      mutate(model_label = if (n_distinct(model_label) > 1) model_label
+                           else if (model_label[[1]] == "default") "normal"
+                           else model_label) |>
+      ungroup()
+  }
+
+  rep_df <- rep_results |>
+    filter(parameter == param, grepl(cat_pattern, scenario_id),
+           !scenario_id %in% exclude) |>
+    left_join(label_data, by = "scenario_id") |>
+    normalise_labels() |>
+    mutate(pct_bias = dplyr::if_else(true_value != 0,
+                                     100 * bias / abs(true_value),
+                                     bias))
+
+  agg_df <- agg_results |>
+    filter(parameter == param, grepl(cat_pattern, scenario_id),
+           !scenario_id %in% exclude) |>
+    left_join(label_data, by = "scenario_id") |>
+    normalise_labels() |>
+    mutate(
+      successes = round(empirical_coverage * n_reps),
+      ci_lo     = qbeta(0.025, successes,     n_reps - successes + 1),
+      ci_hi     = qbeta(0.975, successes + 1, n_reps - successes)
+    )
+
+  no_y <- theme(axis.text.y = element_blank(), axis.ticks.y = element_blank(),
+                axis.title.y = element_blank())
+
+  p1 <- ggplot(rep_df, aes(x = pct_bias, y = label, colour = model_label)) +
+    geom_boxplot(width = 0.5, position = position_dodge(0.6)) +
+    geom_vline(xintercept = 0, linetype = "dashed", colour = "grey50") +
+    labs(x = "Bias (%; raw bias where true = 0)", y = NULL, colour = "Model")
+
+  p2 <- ggplot(agg_df, aes(x = empirical_coverage, y = label, colour = model_label)) +
+    geom_linerange(aes(xmin = ci_lo, xmax = ci_hi),
+                   position = position_dodge(0.6)) +
+    geom_point(position = position_dodge(0.6)) +
+    geom_vline(xintercept = 0.95, linetype = "dashed", colour = "grey50") +
+    scale_x_continuous(labels = scales::percent_format(accuracy = 1)) +
+    labs(x = "Coverage", colour = "Model") +
+    no_y
+
+  p3 <- ggplot(rep_df, aes(x = max_rhat, y = label, colour = model_label)) +
+    geom_boxplot(width = 0.5, position = position_dodge(0.6)) +
+    geom_vline(xintercept = 1.05, linetype = "dashed", colour = "red") +
+    labs(x = "Max Rhat", colour = "Model") +
+    no_y
+
+  grid.arrange(p1, p2, p3, nrow = 1, widths = c(3, 1.5, 3),
+               top = paste0(category, " scenarios: ", param, " diagnostics"))
+}
+
+# ===========================================================================
+# Results table with collapsed scenario descriptions
+# ===========================================================================
+
+#' Aggregated results table with one description block per scenario
+#'
+#' @param agg_results  Aggregated results from aggregate_scenario()
+#' @param lookup       Scenario lookup table from scenario_lookup()
+#' @param category     Character prefix to filter scenarios (e.g., "A")
+#' @param caption      Table caption string
+results_table <- function(agg_results, lookup, category, caption = NULL) {
+  if (is.null(caption))
+    caption <- paste0("Category ", category, ": results")
+
+  # Summarise key model assumptions as a readable string
+  fmt_assumptions <- function(fit) {
+    `%||%` <- rlang::`%||%`
+    parts <- c(
+      if (isTRUE(fit$normalise_by_baseline))  "normalised"       else "unnormalised",
+      if (isTRUE(fit$robust_heterogeneity))   "robust heterogeneity" else "normal heterogeneity",
+      if (isTRUE(fit$design_effects))         "design effects"   else NULL,
+      if (isTRUE(fit$correlated_effects))     "correlated effects" else NULL,
+      switch(fit$time_trend %||% "pooled",
+             pooled     = "pooled trend",
+             fixed_zero = "zero trend",
+             fit$time_trend),
+      switch(fit$baseline_imbalance %||% "estimated",
+             estimated  = "estimated imbalance",
+             fixed_zero = "zero imbalance",
+             fit$baseline_imbalance),
+      if (!isTRUE(fit$hierarchical_rho))      "fixed rho"        else NULL,
+      if (fit$data_format == "individual")    "individual data"  else NULL
+    )
+    paste(parts, collapse = "; ")
+  }
+
+  model_info <- purrr::map_dfr(
+    stringr::str_sort(
+      grep(paste0("^", category, "\\d"), names(SCENARIO_CONFIGS), value = TRUE),
+      numeric = TRUE
+    ),
+    function(id) {
+      tibble::tibble(
+        scenario_id  = id,
+        model        = fmt_assumptions(SCENARIO_CONFIGS[[id]]$fit)
+      )
+    }
+  )
+
+  df <- agg_results |>
+    filter(grepl(paste0("^", category, "\\d"), scenario_id)) |>
+    left_join(lookup,     by = "scenario_id") |>
+    left_join(model_info, by = "scenario_id") |>
+    # Natural sort: A1, A2, ..., A10, A11
+    mutate(scenario_id = forcats::fct_reorder(
+      scenario_id, stringr::str_extract(scenario_id, "\\d+") |> as.integer()
+    )) |>
+    arrange(scenario_id, model_label, parameter) |>
+    select(
+      `Scenario`    = scenario_id,
+      `Description` = description,
+      `Model`       = model,
+      `Fit`         = model_label,
+      `Parameter`   = parameter,
+      `Coverage`    = empirical_coverage,
+      `Bias`        = mean_bias,
+      `RMSE`        = rmse
+    )
+
+  df |>
+    kbl(digits = 3, caption = caption) |>
+    collapse_rows(columns = 1:3, valign = "top") |>
+    kable_styling(bootstrap_options = c("striped", "condensed"), full_width = FALSE)
+}
 
 #' Proportion of fits with Rhat > 1.05, by scenario
 #'

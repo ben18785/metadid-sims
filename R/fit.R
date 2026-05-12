@@ -141,7 +141,7 @@ extract_posteriors <- function(fit) {
 #'
 #' For comparative scenarios, simulates once and fits all model configs,
 #' returning assessment results with a model_label column.
-run_one_rep <- function(scenario_id, rep_seed) {
+run_one_rep <- function(scenario_id, rep_seed, pkg = NULL) {
   config <- SCENARIO_CONFIGS[[scenario_id]]
   sim    <- simulate_scenario(scenario_id, rep_seed)
 

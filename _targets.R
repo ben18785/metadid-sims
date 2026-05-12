@@ -38,10 +38,17 @@ tar_source("R/plots.R")
 # ---------------------------------------------------------------------------
 
 list(
+  # ---- Track metadid source: invalidates all downstream targets on reinstall ----
+  tar_target(
+    metadid_src,
+    c(list.files("../metadid/R", full.names = TRUE), "../metadid/DESCRIPTION"),
+    format = "file"
+  ),
+
   # ---- Category A: Calibration studies ----
   tarchetypes::tar_map_rep(
     name    = A_rep,
-    command = run_one_rep(scenario_id, targets::tar_seed_get()),
+    command = run_one_rep(scenario_id, targets::tar_seed_get(), metadid_src),
     values  = tibble::tibble(scenario_id = scenario_ids("A")),
     names   = tidyselect::any_of("scenario_id"),
     batches = N_REPS,
@@ -52,7 +59,7 @@ list(
   # ---- Category F: Large-N bias probes ----
   tarchetypes::tar_map_rep(
     name    = F_rep,
-    command = run_one_rep(scenario_id, targets::tar_seed_get()),
+    command = run_one_rep(scenario_id, targets::tar_seed_get(), metadid_src),
     values  = tibble::tibble(scenario_id = scenario_ids("F")),
     names   = tidyselect::any_of("scenario_id"),
     batches = N_REPS,
@@ -63,7 +70,7 @@ list(
   # ---- Category B: Comparative studies ----
   tarchetypes::tar_map_rep(
     name    = B_rep,
-    command = run_one_rep(scenario_id, targets::tar_seed_get()),
+    command = run_one_rep(scenario_id, targets::tar_seed_get(), metadid_src),
     values  = tibble::tibble(scenario_id = scenario_ids("B")),
     names   = tidyselect::any_of("scenario_id"),
     batches = N_REPS,
@@ -74,7 +81,7 @@ list(
   # ---- Category C: Outlier and heavy-tailed ----
   tarchetypes::tar_map_rep(
     name    = C_rep,
-    command = run_one_rep(scenario_id, targets::tar_seed_get()),
+    command = run_one_rep(scenario_id, targets::tar_seed_get(), metadid_src),
     values  = tibble::tibble(scenario_id = scenario_ids("C")),
     names   = tidyselect::any_of("scenario_id"),
     batches = N_REPS,
@@ -85,7 +92,7 @@ list(
   # ---- Category D: Assumption violations ----
   tarchetypes::tar_map_rep(
     name    = D_rep,
-    command = run_one_rep(scenario_id, targets::tar_seed_get()),
+    command = run_one_rep(scenario_id, targets::tar_seed_get(), metadid_src),
     values  = tibble::tibble(scenario_id = scenario_ids("D")),
     names   = tidyselect::any_of("scenario_id"),
     batches = N_REPS,
@@ -96,13 +103,24 @@ list(
   # ---- Category E: Edge cases ----
   tarchetypes::tar_map_rep(
     name    = E_rep,
-    command = run_one_rep(scenario_id, targets::tar_seed_get()),
+    command = run_one_rep(scenario_id, targets::tar_seed_get(), metadid_src),
     values  = tibble::tibble(scenario_id = scenario_ids("E")),
     names   = tidyselect::any_of("scenario_id"),
     batches = N_REPS,
     reps    = 1
   ),
   tar_target(E_agg, aggregate_scenario(E_rep)),
+
+  # ---- Scenario lookup table ----
+  tar_target(scenario_lookup_tbl, scenario_lookup()),
+
+  # ---- Diagnostic plots (% bias, coverage, Rhat) per category ----
+  tar_target(diag_plot_A, plot_diagnostics(A_rep, A_agg, scenario_lookup_tbl, "A")),
+  tar_target(diag_plot_F, plot_diagnostics(F_rep, F_agg, scenario_lookup_tbl, "F")),
+  tar_target(diag_plot_B, plot_diagnostics(B_rep, B_agg, scenario_lookup_tbl, "B")),
+  tar_target(diag_plot_C, plot_diagnostics(C_rep, C_agg, scenario_lookup_tbl, "C")),
+  tar_target(diag_plot_D, plot_diagnostics(D_rep, D_agg, scenario_lookup_tbl, "D")),
+  tar_target(diag_plot_E, plot_diagnostics(E_rep, E_agg, scenario_lookup_tbl, "E")),
 
   # ---- Combined results ----
   tar_target(
@@ -124,6 +142,37 @@ list(
       "output/aggregated_results.csv"
     },
     format = "file"
+  ),
+
+  tar_target(
+    archive_results,
+    {
+      install_datetime <- file.info(
+        system.file("DESCRIPTION", package = "metadid")
+      )$mtime
+
+      stamped <- all_agg |>
+        dplyr::mutate(
+          metadid_install_datetime = install_datetime,
+          run_date                 = Sys.time()
+        )
+
+      archive_path <- "output/archive.csv"
+      if (file.exists(archive_path)) {
+        existing <- readr::read_csv(archive_path, show_col_types = FALSE)
+        # Only append if this install datetime isn't already recorded
+        if (!any(existing$metadid_install_datetime == install_datetime)) {
+          stamped <- dplyr::bind_rows(existing, stamped)
+        } else {
+          stamped <- existing
+        }
+      }
+
+      readr::write_csv(stamped, archive_path)
+      archive_path
+    },
+    format = "file",
+    cue = tar_cue(mode = "always")
   ),
 
   tar_target(

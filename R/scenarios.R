@@ -275,6 +275,40 @@ SCENARIO_CONFIGS <- list(
     )
   ),
 
+  B5 = scenario(
+    "RCT baseline imbalance (only in this design): full (estimated) vs naive (fixed zero), 10 DiD + 10 RCT",
+    dgp = list(
+      type           = "bespoke",
+      bespoke_fn     = "simulate_rct_imbalance",
+      n_did          = 10L,
+      n_rct          = 10L,
+      rct_gamma_mean = 0.05,
+      rct_gamma_sd   = 0.02
+    ),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general", baseline_imbalance = "fixed_zero")
+    )
+  ),
+
+  B6 = scenario(
+    "DiD imbalance > RCT imbalance: full vs naive, 15 DiD + 15 RCT",
+    dgp = list(
+      type           = "bespoke",
+      bespoke_fn     = "simulate_did_rct_imbalance",
+      n_did          = 15L,
+      n_rct          = 15L,
+      did_gamma_mean = 0.08,
+      did_gamma_sd   = 0.02,
+      rct_gamma_mean = 0.01,
+      rct_gamma_sd   = 0.01
+    ),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general", baseline_imbalance = "fixed_zero")
+    )
+  ),
+
   # ---------------------------------------------------------------------------
   # Category C: Outlier and heavy-tailed studies
   # ---------------------------------------------------------------------------
@@ -493,6 +527,36 @@ SCENARIO_CONFIGS <- list(
     "Missing rho: hierarchical_rho imputes",
     dgp = list(n_did = 20L),
     fit = list(provide_rho = FALSE, hierarchical_rho = TRUE)
+  ),
+
+  # ---------------------------------------------------------------------------
+  # Category A (continued): Sign and direction variants
+  # All other parameters held at default; only effect/trend signs vary.
+  # ---------------------------------------------------------------------------
+
+  A14 = scenario(
+    "Positive effect: true_effect = +0.15, trend = -0.04",
+    dgp = list(true_effect = 0.15)
+  ),
+
+  A15 = scenario(
+    "Null effect: true_effect = 0, trend = -0.04",
+    dgp = list(true_effect = 0)
+  ),
+
+  A16 = scenario(
+    "Positive trend: true_effect = -0.15, trend = +0.04",
+    dgp = list(true_trend = 0.04)
+  ),
+
+  A17 = scenario(
+    "Sign mismatch: negative effect (-0.15) with positive trend (+0.04), PP-heavy",
+    dgp = list(n_did = 10L, n_pp = 20L, true_effect = -0.15, true_trend = 0.04)
+  ),
+
+  A18 = scenario(
+    "Both positive: true_effect = +0.15, trend = +0.04",
+    dgp = list(true_effect = 0.15, true_trend = 0.04)
   )
 )
 
@@ -503,4 +567,49 @@ SCENARIO_CONFIGS <- list(
 scenario_ids <- function(prefix) {
   ids <- grep(paste0("^", prefix, "\\d"), names(SCENARIO_CONFIGS), value = TRUE)
   sort(ids)
+}
+
+scenario_lookup <- function() {
+  tibble::tibble(
+    scenario_id = names(SCENARIO_CONFIGS),
+    description = purrr::map_chr(SCENARIO_CONFIGS, "description")
+  )
+}
+
+# Format a named list of overrides as a compact key=value string,
+# omitting NULL values and collapsing to a single line.
+.fmt_overrides <- function(overrides, defaults) {
+  diffs <- overrides[!names(overrides) %in% c("type", "bespoke_fn", "covariates", "beta_cov")]
+  diffs <- Filter(function(x) !is.null(x), diffs)
+  # Keep only keys that differ from the defaults
+  diffs <- diffs[purrr::map_lgl(names(diffs), function(k) {
+    !identical(diffs[[k]], defaults[[k]])
+  })]
+  if (length(diffs) == 0) return("(defaults)")
+  paste(names(diffs), purrr::map_chr(diffs, function(v) {
+    if (is.numeric(v) && length(v) == 1) as.character(v)
+    else if (is.character(v) && length(v) == 1) v
+    else paste0("[", paste(v, collapse = ", "), "]")
+  }), sep = " = ", collapse = "; ")
+}
+
+#' Scenario summary table for a given category
+#'
+#' Returns a data frame with one row per scenario showing the description,
+#' DGP overrides from defaults, and fit overrides from defaults.
+#'
+#' @param category Character prefix, e.g. "A"
+scenario_summary_table <- function(category) {
+  ids <- stringr::str_sort(scenario_ids(category), numeric = TRUE)
+  purrr::map_dfr(ids, function(id) {
+    cfg <- SCENARIO_CONFIGS[[id]]
+    dgp_str <- .fmt_overrides(cfg$dgp, default_dgp)
+    fit_str <- .fmt_overrides(cfg$fit, default_fit)
+    tibble::tibble(
+      ID          = id,
+      Description = cfg$description,
+      `DGP overrides` = dgp_str,
+      `Fit overrides` = fit_str
+    )
+  })
 }

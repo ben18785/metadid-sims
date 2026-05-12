@@ -8,9 +8,16 @@ format:
     toc-depth: 3
     code-fold: true
     embed-resources: true
+    page-layout: full
 execute:
   echo: true
   warning: false
+
+knitr:
+  opts_chunk:
+    fig.width: 16
+    fig.height: 7
+    out.width: "100%"
 ---
 
 ```{r setup}
@@ -18,12 +25,14 @@ library(targets)
 library(dplyr)
 library(ggplot2)
 library(knitr)
+library(kableExtra)
 
 tar_source("R/scenarios.R")
 tar_source("R/plots.R")
 
 all_agg <- tar_read(all_agg)
 all_rep <- tar_read(all_rep)
+scenario_lookup_tbl <- scenario_lookup()
 ```
 
 ## Executive Summary
@@ -63,98 +72,122 @@ kable(
 
 ## A. Calibration Studies
 
-```{r a-coverage}
-plot_coverage(all_agg, category = "A")
+These scenarios test the model's core calibration properties — coverage, bias, and RMSE — under a range of study counts, design mixes, and parameterisations. All use the full `meta_did` model unless noted. The baseline scenario (A1) uses 20 DiD studies with default parameters; subsequent scenarios probe how performance changes with sample size (A2–A4), mixed designs (A5–A6), covariates (A7), correlated effects (A8), unnormalised fitting (A9–A10), individual-level data (A11–A12), rho estimation strategies (A13), and sign/direction variants (A14–A18).
+
+```{r a-scenarios}
+scenario_summary_table("A") |>
+  kable(caption = "Category A: scenario definitions")
 ```
 
-```{r a-bias}
-plot_bias(all_rep, category = "A")
+```{r a-diagnostics}
+#| fig-height: 9
+#| column: screen
+#| out-width: "100%"
+plot_diagnostics(all_rep, all_agg, scenario_lookup_tbl, "A")
 ```
 
 ```{r a-table}
-all_agg |>
-  filter(grepl("^A", scenario_id)) |>
-  select(scenario_id, model_label, parameter,
-         empirical_coverage, mean_bias, rmse, mean_ci_width) |>
-  kable(digits = 3, caption = "Category A: Calibration results")
+results_table(all_agg, scenario_lookup_tbl, "A")
 ```
 
 ## F. Large-N Bias Probes
 
-```{r f-coverage}
-plot_coverage(all_agg, category = "F")
+These scenarios use large numbers of studies (200 total) to narrow posteriors and expose any systematic bias that would be obscured in smaller samples. They vary the design mix, normalisation strategy, and model specification, allowing a stringent test of whether the model is asymptotically unbiased.
+
+```{r f-scenarios}
+scenario_summary_table("F") |>
+  kable(caption = "Category F: scenario definitions")
 ```
 
-```{r f-bias}
-plot_bias(all_rep, category = "F")
+```{r f-diagnostics}
+#| fig-height: 7
+#| column: screen
+#| out-width: "100%"
+plot_diagnostics(all_rep, all_agg, scenario_lookup_tbl, "F")
 ```
 
 ```{r f-table}
-all_agg |>
-  filter(grepl("^F", scenario_id)) |>
-  select(scenario_id, model_label, parameter,
-         empirical_coverage, mean_bias, rmse, mean_ci_width) |>
-  kable(digits = 3, caption = "Category F: Large-N bias probe results")
+results_table(all_agg, scenario_lookup_tbl, "F")
 ```
 
 ## B. Comparative Studies
 
-```{r b-comparison}
-plot_comparison(all_rep |> filter(grepl("^B", scenario_id)))
+These scenarios pit two model configurations against each other on the same simulated data, asking which recovers the treatment effect better under specific conditions. Each scenario has a clear hypothesis about which model should win (or whether they should tie).
+
+```{r b-scenarios}
+scenario_summary_table("B") |>
+  kable(caption = "Category B: scenario definitions")
+```
+
+```{r b-diagnostics}
+#| fig-height: 7
+#| column: screen
+#| out-width: "100%"
+plot_diagnostics(all_rep, all_agg, scenario_lookup_tbl, "B")
 ```
 
 ```{r b-table}
-all_agg |>
-  filter(grepl("^B", scenario_id)) |>
-  select(scenario_id, model_label, parameter,
-         empirical_coverage, mean_bias, rmse) |>
-  kable(digits = 3, caption = "Category B: Model comparison results")
+results_table(all_agg, scenario_lookup_tbl, "B")
 ```
 
 ## C. Outlier and Heavy-Tailed Studies
 
-```{r c-comparison}
-plot_comparison(all_rep |> filter(grepl("^C", scenario_id)))
+These scenarios test robustness to departures from Gaussian study-level heterogeneity. The contaminating distributions are chosen to be detectable but not catastrophic, so that a robust model (Student-t heterogeneity) should outperform the normal model without being trivially obvious.
+
+```{r c-scenarios}
+scenario_summary_table("C") |>
+  kable(caption = "Category C: scenario definitions")
+```
+
+```{r c-diagnostics}
+#| fig-height: 8
+#| column: screen
+#| out-width: "100%"
+plot_diagnostics(all_rep, all_agg, scenario_lookup_tbl, "C")
 ```
 
 ```{r c-table}
-all_agg |>
-  filter(grepl("^C", scenario_id)) |>
-  select(scenario_id, model_label, parameter,
-         empirical_coverage, mean_bias, rmse) |>
-  kable(digits = 3, caption = "Category C: Outlier/heavy-tail results")
+results_table(all_agg, scenario_lookup_tbl, "C")
 ```
 
 ## D. Assumption Violation Studies
 
-```{r d-coverage}
-plot_coverage(all_agg, category = "D")
+These scenarios introduce deliberate mismatches between the DGP and the fitted model to quantify the cost of specific assumption violations — unmodelled design effects, heterogeneous within-study variance, misspecified rho, effect-size/sample-size correlation, and ignored RCT baseline imbalance.
+
+```{r d-scenarios}
+scenario_summary_table("D") |>
+  kable(caption = "Category D: scenario definitions")
 ```
 
-```{r d-bias}
-plot_bias(all_rep, category = "D")
+```{r d-diagnostics}
+#| fig-height: 6
+#| column: screen
+#| out-width: "100%"
+plot_diagnostics(all_rep, all_agg, scenario_lookup_tbl, "D")
 ```
 
 ```{r d-table}
-all_agg |>
-  filter(grepl("^D", scenario_id)) |>
-  select(scenario_id, model_label, parameter,
-         empirical_coverage, mean_bias, rmse) |>
-  kable(digits = 3, caption = "Category D: Assumption violation results")
+results_table(all_agg, scenario_lookup_tbl, "D")
 ```
 
 ## E. Edge Cases
 
-```{r e-coverage}
-plot_coverage(all_agg, category = "E")
+These scenarios probe boundary conditions: extreme pre-post correlations, zero heterogeneity, very large heterogeneity, unbalanced arms, single studies per design, and missing rho values. They test whether the model remains stable and well-calibrated when inputs approach the limits of the assumed data-generating regime.
+
+```{r e-scenarios}
+scenario_summary_table("E") |>
+  kable(caption = "Category E: scenario definitions")
+```
+
+```{r e-diagnostics}
+#| fig-height: 6
+#| column: screen
+#| out-width: "100%"
+plot_diagnostics(all_rep, all_agg, scenario_lookup_tbl, "E", exclude = "E5")
 ```
 
 ```{r e-table}
-all_agg |>
-  filter(grepl("^E", scenario_id)) |>
-  select(scenario_id, model_label, parameter,
-         empirical_coverage, mean_bias, rmse) |>
-  kable(digits = 3, caption = "Category E: Edge case results")
+results_table(all_agg, scenario_lookup_tbl, "E")
 ```
 
 ## Convergence Diagnostics

@@ -646,6 +646,86 @@ simulate_rct_imbalance <- function(config) {
   list(data = list(summary_data = summary_df), true_params = true_params)
 }
 
+# Simulate DiD + RCT where DiD studies have larger within-study baseline
+# imbalance (treatment arm starts at baseline + gamma) than RCT studies.
+# DiD differencing recovers theta regardless of gamma, but a naive model that
+# pools imbalance across designs may incorrectly inflate RCT imbalance
+# estimates when DiD imbalance is large.
+#
+# DGP parameters (beyond defaults):
+#   did_gamma_mean / did_gamma_sd  — imbalance distribution for DiD
+#   rct_gamma_mean / rct_gamma_sd  — imbalance distribution for RCT
+simulate_did_rct_imbalance <- function(config) {
+  dgp <- config$dgp
+
+  # DiD studies: treatment arm starts at baseline + gamma
+  did_thetas    <- rnorm(dgp$n_did, dgp$true_effect, dgp$sigma_effect)
+  did_betas     <- rnorm(dgp$n_did, dgp$true_trend,  dgp$sigma_trend)
+  did_baselines <- rnorm(dgp$n_did, dgp$baseline_mean, dgp$baseline_sd)
+  did_gammas    <- rnorm(dgp$n_did, dgp$did_gamma_mean, dgp$did_gamma_sd)
+
+  did_summary <- purrr::pmap_dfr(
+    tibble(
+      study_id = paste0("did_", seq_len(dgp$n_did)),
+      theta = did_thetas, beta = did_betas,
+      baseline = did_baselines, gamma = did_gammas
+    ),
+    function(study_id, theta, beta, baseline, gamma, ...) {
+      Sigma   <- dgp$within_sd^2 * matrix(c(1, dgp$rho, dgp$rho, 1), 2, 2)
+      mu_ctrl <- c(baseline,         baseline + beta)
+      mu_trt  <- c(baseline + gamma, baseline + gamma + beta + theta)
+      ctrl <- MASS::mvrnorm(dgp$n_control,   mu_ctrl, Sigma)
+      trt  <- MASS::mvrnorm(dgp$n_treatment, mu_trt,  Sigma)
+      tibble(
+        study_id             = study_id,
+        design               = "did",
+        n_control            = dgp$n_control,
+        n_treatment          = dgp$n_treatment,
+        mean_pre_control     = mean(ctrl[, 1]),
+        mean_post_control    = mean(ctrl[, 2]),
+        sd_pre_control       = sd(ctrl[, 1]),
+        sd_post_control      = sd(ctrl[, 2]),
+        mean_pre_treatment   = mean(trt[, 1]),
+        mean_post_treatment  = mean(trt[, 2]),
+        sd_pre_treatment     = sd(trt[, 1]),
+        sd_post_treatment    = sd(trt[, 2]),
+        rho = (cor(ctrl[, 1], ctrl[, 2]) + cor(trt[, 1], trt[, 2])) / 2
+      )
+    }
+  )
+
+  # RCT studies: small/zero imbalance
+  rct_thetas    <- rnorm(dgp$n_rct, dgp$true_effect, dgp$sigma_effect)
+  rct_baselines <- rnorm(dgp$n_rct, dgp$baseline_mean, dgp$baseline_sd)
+  rct_gammas    <- rnorm(dgp$n_rct, dgp$rct_gamma_mean, dgp$rct_gamma_sd)
+
+  rct_summary <- purrr::pmap_dfr(
+    tibble(
+      study_id = paste0("rct_", seq_len(dgp$n_rct)),
+      theta = rct_thetas, baseline = rct_baselines, gamma = rct_gammas
+    ),
+    function(study_id, theta, baseline, gamma, ...) {
+      ctrl_post <- rnorm(dgp$n_control,   baseline,               dgp$within_sd)
+      trt_post  <- rnorm(dgp$n_treatment, baseline + gamma + theta, dgp$within_sd)
+      tibble(
+        study_id            = study_id,
+        design              = "rct",
+        n_control           = dgp$n_control,
+        n_treatment         = dgp$n_treatment,
+        mean_post_control   = mean(ctrl_post),
+        sd_post_control     = sd(ctrl_post),
+        mean_post_treatment = mean(trt_post),
+        sd_post_treatment   = sd(trt_post)
+      )
+    }
+  )
+
+  summary_df  <- bind_rows(did_summary, rct_summary)
+  true_params <- build_true_params(dgp, config$true, config$fit$normalise_by_baseline)
+
+  list(data = list(summary_data = summary_df), true_params = true_params)
+}
+
 # ===========================================================================
 # Bespoke DGPs: Edge cases (Category E)
 # ===========================================================================
