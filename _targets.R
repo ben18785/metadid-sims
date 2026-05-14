@@ -59,10 +59,14 @@ list(
   tar_target(A_agg, aggregate_scenario(A_rep)),
 
   # ---- Category A: Robust comparator (new fits, does not invalidate A_rep) ----
+  # Excludes scenarios with correlated_effects = TRUE (incompatible with robust_heterogeneity)
   tarchetypes::tar_map_rep(
     name    = A_rep_robust,
     command = run_robust_rep(scenario_id, targets::tar_seed_get(), metadid_src),
-    values  = tibble::tibble(scenario_id = scenario_ids("A")),
+    values  = tibble::tibble(scenario_id = Filter(
+      function(s) !isTRUE(SCENARIO_CONFIGS[[s]]$fit$correlated_effects),
+      scenario_ids("A")
+    )),
     names   = tidyselect::any_of("scenario_id"),
     batches = N_REPS,
     reps    = 1
@@ -88,10 +92,14 @@ list(
   tar_target(F_agg, aggregate_scenario(F_rep)),
 
   # ---- Category F: Robust comparator (new fits, does not invalidate F_rep) ----
+  # Excludes scenarios with correlated_effects = TRUE (incompatible with robust_heterogeneity)
   tarchetypes::tar_map_rep(
     name    = F_rep_robust,
     command = run_robust_rep(scenario_id, targets::tar_seed_get(), metadid_src),
-    values  = tibble::tibble(scenario_id = scenario_ids("F")),
+    values  = tibble::tibble(scenario_id = Filter(
+      function(s) !isTRUE(SCENARIO_CONFIGS[[s]]$fit$correlated_effects),
+      scenario_ids("F")
+    )),
     names   = tidyselect::any_of("scenario_id"),
     batches = N_REPS,
     reps    = 1
@@ -159,8 +167,9 @@ list(
     name    = G_rep,
     command = run_g_rep(scenario_id, targets::tar_seed_get(), metadid_src),
     values  = tibble::tibble(scenario_id = scenario_ids("G")),
-    batches = 5L,
-    reps    = 5L
+    names   = tidyselect::any_of("scenario_id"),
+    batches = N_REPS,
+    reps    = 1L
   ),
   tar_target(G_agg, aggregate_scenario(G_rep)),
 

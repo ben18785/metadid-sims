@@ -194,6 +194,30 @@ plot_diagnostics(all_rep, all_agg, scenario_lookup_tbl, "E", exclude = "E5")
 results_table(all_agg, scenario_lookup_tbl, "E")
 ```
 
+## G. Bias Source Investigation
+
+Category G probes the two systematic bias sources identified in the large-N results (Category F). It comprises two sub-investigations.
+
+**G1–G5: Prior sensitivity (unnormalised model).** The unnormalised model showed a small positive bias (~0.6–0.9%) for a negative true effect, consistent with hierarchical shrinkage toward zero from the default `N(0, 10)` prior on `treatment_effect_mean`. G1–G5 vary the prior standard deviation from 1 to 100 (G3 replicates the default) to test whether the bias decreases monotonically as the prior becomes more diffuse.
+
+**G6–G9: Jensen's inequality (normalised model).** The normalised model showed ~1% systematic downward bias at 200 studies, consistent with Jensen's inequality on the ratio estimator: because the model fits E[θ/baseline] rather than E[θ]/E[baseline], the convexity of the reciprocal function induces a negative shift proportional to between-study baseline variance. G6–G8 vary between-study baseline variation (`baseline_sd` = 0, 0.01, 0.10) to confirm that the bias tracks the Jensen term; G9 uses a very large control group (`n_control = 5000`) to test whether high within-study precision alone eliminates the bias.
+
+```{r g-scenarios}
+scenario_summary_table("G") |>
+  kable(caption = "Category G: scenario definitions")
+```
+
+```{r g-diagnostics}
+#| fig-height: 9
+#| column: screen
+#| out-width: "100%"
+plot_diagnostics(all_rep, all_agg, scenario_lookup_tbl, "G")
+```
+
+```{r g-table}
+results_table(all_agg, scenario_lookup_tbl, "G")
+```
+
 ## Convergence Diagnostics
 
 ```{r convergence}
