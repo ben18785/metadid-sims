@@ -126,8 +126,8 @@ SCENARIO_CONFIGS <- list(
   ),
 
   A8 = scenario(
-    "Correlated effects: 30 DiD, rho_effect_trend = 0.6",
-    dgp = list(n_did = 30L, rho_effect_trend = 0.6, baseline_sd = 0),
+    "Correlated effects: 30 DiD, rho_effect_trend = 0.95",
+    dgp = list(n_did = 30L, rho_effect_trend = 0.95, baseline_sd = 0),
     fit = list(fn = "meta_did_general", correlated_effects = TRUE)
   ),
 
@@ -219,8 +219,8 @@ SCENARIO_CONFIGS <- list(
   ),
 
   F8 = scenario(
-    "Large DiD-only, correlated effects: 200 studies, rho_effect_trend = 0.6",
-    dgp = list(n_did = 200L, rho_effect_trend = 0.6, baseline_sd = 0),
+    "Large DiD-only, correlated effects: 200 studies, rho_effect_trend = 0.95",
+    dgp = list(n_did = 200L, rho_effect_trend = 0.95, baseline_sd = 0),
     fit = list(fn = "meta_did_general", correlated_effects = TRUE)
   ),
 
@@ -267,8 +267,8 @@ SCENARIO_CONFIGS <- list(
   ),
 
   B4 = scenario(
-    "Correlated vs independent effects: rho_effect_trend = 0.6",
-    dgp = list(n_did = 30L, rho_effect_trend = 0.6, baseline_sd = 0),
+    "Correlated vs independent effects: rho_effect_trend = 0.95",
+    dgp = list(n_did = 30L, rho_effect_trend = 0.95, baseline_sd = 0),
     compare = list(
       list(label = "correlated",  fn = "meta_did_general", correlated_effects = TRUE),
       list(label = "independent", fn = "meta_did")
@@ -661,6 +661,93 @@ SCENARIO_CONFIGS <- list(
   G9 = scenario(
     "Jensen's test: n_control = 5000, high within-study precision (200 DiD)",
     dgp = list(n_did = 200L, n_control = 5000L)
+  ),
+
+  # ---------------------------------------------------------------------------
+  # Category H: Time trend distributional misspecification
+  #
+  # Each scenario uses 15 DiD + 15 PP studies (PP studies require trend
+  # estimation for effect identification, making distributional shape matter).
+  # All scenarios compare three models on the same simulated data:
+  #   full_normal — meta_did with normal heterogeneity (default)
+  #   full_robust — meta_did with Student-t heterogeneity
+  #   naive       — meta_did_general with time_trend = "fixed_zero" and
+  #                 baseline_imbalance = "fixed_zero"
+  # ---------------------------------------------------------------------------
+
+  H1 = scenario(
+    "Skewed trends: beta_i ~ -LogNormal (mean = -0.04, log-SD = 1), 15 DiD + 15 PP",
+    dgp = list(
+      type             = "bespoke",
+      bespoke_fn       = "simulate_lognormal_trends",
+      n_did            = 15L,
+      n_pp             = 15L,
+      true_trend       = -0.04,   # E[beta_i] matches lognormal mean
+      sigma_trend      = 0.052,   # approx SD of the log-normal
+      lognormal_sigma  = 1.0      # log-scale SD; controls degree of skew
+    ),
+    compare = list(
+      list(label = "full_normal", fn = "meta_did"),
+      list(label = "full_robust", fn = "meta_did", robust_heterogeneity = TRUE),
+      list(label = "naive",       fn = "meta_did_general",
+           time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
+    )
+  ),
+
+  H2 = scenario(
+    "Bimodal trends: 50/50 mixture N(-0.10, 0.01) + N(-0.01, 0.01), 15 DiD + 15 PP",
+    dgp = list(
+      type         = "bespoke",
+      bespoke_fn   = "simulate_bimodal_trends",
+      n_did        = 15L,
+      n_pp         = 15L,
+      true_trend   = -0.055,  # mixture mean
+      sigma_trend  = 0.046,   # mixture SD
+      trend_low    = -0.10,   # mean of low-trend component
+      trend_high   = -0.01,   # mean of high-trend component
+      mix_prob     = 0.5,     # probability of high-trend component
+      sigma_within = 0.01     # within-component SD
+    ),
+    compare = list(
+      list(label = "full_normal", fn = "meta_did"),
+      list(label = "full_robust", fn = "meta_did", robust_heterogeneity = TRUE),
+      list(label = "naive",       fn = "meta_did_general",
+           time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
+    )
+  ),
+
+  H3 = scenario(
+    "Large trend variance: sigma_trend = 0.10 (5x default), 15 DiD + 15 PP",
+    dgp = list(n_did = 15L, n_pp = 15L, sigma_trend = 0.10),
+    compare = list(
+      list(label = "full_normal", fn = "meta_did"),
+      list(label = "full_robust", fn = "meta_did", robust_heterogeneity = TRUE),
+      list(label = "naive",       fn = "meta_did_general",
+           time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
+    )
+  ),
+
+  H4 = scenario(
+    "Trend-size confounding: DiD n ~ U(30,70), PP n ~ U(150,250), 15 DiD + 15 PP",
+    dgp = list(
+      type             = "bespoke",
+      bespoke_fn       = "simulate_trend_size_corr",
+      n_did            = 15L,
+      n_pp             = 15L,
+      true_trend       = -0.04,   # trend at mean study size
+      sigma_trend      = 0.02,    # residual trend SD after size adjustment
+      trend_size_slope = 3e-4,    # beta units per unit of n_treatment above mean
+      n_small_min      = 30L,     # DiD study size range
+      n_small_max      = 70L,
+      n_large_min      = 150L,    # PP study size range
+      n_large_max      = 250L
+    ),
+    compare = list(
+      list(label = "full_normal", fn = "meta_did"),
+      list(label = "full_robust", fn = "meta_did", robust_heterogeneity = TRUE),
+      list(label = "naive",       fn = "meta_did_general",
+           time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
+    )
   )
 )
 

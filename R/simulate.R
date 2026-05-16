@@ -18,10 +18,9 @@ library(metadid)
 # Main dispatcher
 # ===========================================================================
 
-simulate_scenario <- function(scenario_id, rep_seed) {
+simulate_scenario <- function(scenario_id, rep_seed, config) {
 
-  config <- SCENARIO_CONFIGS[[scenario_id]]
-  dgp    <- config$dgp
+  dgp <- config$dgp
   set.seed(rep_seed)
 
   if (dgp$type == "metadid") {
@@ -729,6 +728,156 @@ simulate_did_rct_imbalance <- function(config) {
 # ===========================================================================
 # Bespoke DGPs: Edge cases (Category E)
 # ===========================================================================
+
+# ===========================================================================
+# Bespoke DGPs: Time trend distribution misspecification (Category H)
+# ===========================================================================
+
+#' Skewed (log-normal) time trends: beta_i ~ -LogNormal
+#'
+#' The model assumes beta_i ~ N(mu, sigma^2), but here beta_i is drawn from a
+#' negated log-normal with the same mean as true_trend. lognormal_sigma
+#' (on the log scale) controls the degree of skewness.
+simulate_lognormal_trends <- function(config) {
+  dgp <- config$dgp
+  n   <- dgp$n_did + dgp$n_pp
+
+  # Derive log-scale location so that E[beta_i] = true_trend
+  lognormal_mu <- log(abs(dgp$true_trend)) - dgp$lognormal_sigma^2 / 2
+
+  thetas    <- rnorm(n, dgp$true_effect,  dgp$sigma_effect)
+  baselines <- rnorm(n, dgp$baseline_mean, dgp$baseline_sd)
+  betas     <- -rlnorm(n, lognormal_mu, dgp$lognormal_sigma)
+
+  did_idx <- seq_len(dgp$n_did)
+  pp_idx  <- seq(dgp$n_did + 1L, n)
+
+  did_summary <- simulate_did_summary_from_params(
+    tibble(study_id = paste0("did_", seq_len(dgp$n_did)),
+           theta = thetas[did_idx], beta = betas[did_idx],
+           baseline = baselines[did_idx]),
+    dgp
+  )
+
+  pp_summary <- purrr::pmap_dfr(
+    tibble(study_id = paste0("pp_", seq_len(dgp$n_pp)),
+           theta = thetas[pp_idx], beta = betas[pp_idx],
+           baseline = baselines[pp_idx]),
+    function(study_id, theta, beta, baseline, ...) {
+      make_pp_summary(simulate_one_study(study_id, theta, beta, baseline,
+                                         dgp$n_control, dgp$n_treatment,
+                                         dgp$within_sd, dgp$rho))
+    }
+  )
+
+  list(
+    data        = list(summary_data = bind_rows(did_summary, pp_summary)),
+    true_params = build_true_params(dgp, config$true, config$fit$normalise_by_baseline)
+  )
+}
+
+#' Bimodal time trends: mixture of two normals
+#'
+#' beta_i is drawn from a 50/50 mixture of N(trend_low, sigma_within^2) and
+#' N(trend_high, sigma_within^2). Both components have the same within-group SD.
+#' true_trend in dgp should equal mix_prob*trend_high + (1-mix_prob)*trend_low.
+simulate_bimodal_trends <- function(config) {
+  dgp <- config$dgp
+  n   <- dgp$n_did + dgp$n_pp
+
+  component <- rbinom(n, 1L, dgp$mix_prob)
+  betas     <- ifelse(
+    component == 1L,
+    rnorm(n, dgp$trend_high, dgp$sigma_within),
+    rnorm(n, dgp$trend_low,  dgp$sigma_within)
+  )
+  thetas    <- rnorm(n, dgp$true_effect,  dgp$sigma_effect)
+  baselines <- rnorm(n, dgp$baseline_mean, dgp$baseline_sd)
+
+  did_idx <- seq_len(dgp$n_did)
+  pp_idx  <- seq(dgp$n_did + 1L, n)
+
+  did_summary <- simulate_did_summary_from_params(
+    tibble(study_id = paste0("did_", seq_len(dgp$n_did)),
+           theta = thetas[did_idx], beta = betas[did_idx],
+           baseline = baselines[did_idx]),
+    dgp
+  )
+
+  pp_summary <- purrr::pmap_dfr(
+    tibble(study_id = paste0("pp_", seq_len(dgp$n_pp)),
+           theta = thetas[pp_idx], beta = betas[pp_idx],
+           baseline = baselines[pp_idx]),
+    function(study_id, theta, beta, baseline, ...) {
+      make_pp_summary(simulate_one_study(study_id, theta, beta, baseline,
+                                         dgp$n_control, dgp$n_treatment,
+                                         dgp$within_sd, dgp$rho))
+    }
+  )
+
+  list(
+    data        = list(summary_data = bind_rows(did_summary, pp_summary)),
+    true_params = build_true_params(dgp, config$true, config$fit$normalise_by_baseline)
+  )
+}
+
+#' Trend-size confounding: DiD studies have small n, PP studies have large n
+#'
+#' Trend is negatively correlated with study size (larger n -> trend closer to
+#' zero). DiD studies are drawn with n_treatment ~ U(n_small_min, n_small_max)
+#' and PP studies with n_treatment ~ U(n_large_min, n_large_max). This creates
+#' a design-confounded trend: the model learns trend primarily from small DiD
+#' studies and misapplies it to the larger PP studies.
+simulate_trend_size_corr <- function(config) {
+  dgp <- config$dgp
+
+  n_did <- dgp$n_did
+  n_pp  <- dgp$n_pp
+
+  # Study-specific sample sizes
+  n_did_vec <- sample(dgp$n_small_min:dgp$n_small_max, n_did, replace = TRUE)
+  n_pp_vec  <- sample(dgp$n_large_min:dgp$n_large_max, n_pp,  replace = TRUE)
+  all_n     <- c(n_did_vec, n_pp_vec)
+  mean_n    <- mean(all_n)
+
+  # Trend proportional to deviation from mean study size
+  betas_did <- dgp$true_trend + dgp$trend_size_slope * (n_did_vec - mean_n) +
+               rnorm(n_did, 0, dgp$sigma_trend)
+  betas_pp  <- dgp$true_trend + dgp$trend_size_slope * (n_pp_vec  - mean_n) +
+               rnorm(n_pp,  0, dgp$sigma_trend)
+
+  thetas_did    <- rnorm(n_did, dgp$true_effect,  dgp$sigma_effect)
+  thetas_pp     <- rnorm(n_pp,  dgp$true_effect,  dgp$sigma_effect)
+  baselines_did <- rnorm(n_did, dgp$baseline_mean, dgp$baseline_sd)
+  baselines_pp  <- rnorm(n_pp,  dgp$baseline_mean, dgp$baseline_sd)
+
+  did_summary <- purrr::pmap_dfr(
+    tibble(study_id = paste0("did_", seq_len(n_did)),
+           theta = thetas_did, beta = betas_did,
+           baseline = baselines_did, nc = n_did_vec),
+    function(study_id, theta, beta, baseline, nc, ...) {
+      row <- simulate_one_study(study_id, theta, beta, baseline,
+                                nc, nc, dgp$within_sd, dgp$rho)
+      row$design <- "did"
+      row
+    }
+  )
+
+  pp_summary <- purrr::pmap_dfr(
+    tibble(study_id = paste0("pp_", seq_len(n_pp)),
+           theta = thetas_pp, beta = betas_pp,
+           baseline = baselines_pp, nc = n_pp_vec),
+    function(study_id, theta, beta, baseline, nc, ...) {
+      make_pp_summary(simulate_one_study(study_id, theta, beta, baseline,
+                                         nc, nc, dgp$within_sd, dgp$rho))
+    }
+  )
+
+  list(
+    data        = list(summary_data = bind_rows(did_summary, pp_summary)),
+    true_params = build_true_params(dgp, config$true, config$fit$normalise_by_baseline)
+  )
+}
 
 simulate_extreme_rho <- function(config) {
   dgp <- config$dgp

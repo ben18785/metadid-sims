@@ -11,10 +11,9 @@ library(metadid)
 #' @param scenario_id String identifying the scenario in SCENARIO_CONFIGS
 #' @param rep_seed    Integer seed for this replication
 #' @param pkg         Ignored; used to create a dependency on metadid_src
-run_robust_rep <- function(scenario_id, rep_seed, pkg = NULL) {
+run_robust_rep <- function(scenario_id, config, rep_seed, pkg = NULL) {
 
-  config        <- SCENARIO_CONFIGS[[scenario_id]]
-  sim           <- simulate_scenario(scenario_id, rep_seed)
+  sim <- simulate_scenario(scenario_id, rep_seed, config)
 
   robust_config                        <- config
   robust_config$fit$robust_heterogeneity <- TRUE

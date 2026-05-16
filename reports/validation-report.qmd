@@ -167,7 +167,9 @@ scenario_summary_table("D") |>
 #| fig-height: 6
 #| column: screen
 #| out-width: "100%"
-plot_diagnostics(all_rep, all_agg, scenario_lookup_tbl, "D")
+D_combined     <- tar_read(D_combined)
+D_agg_combined <- tar_read(D_agg_combined)
+plot_diagnostics(D_combined, D_agg_combined, scenario_lookup_tbl, "D")
 ```
 
 ```{r d-table}
@@ -187,11 +189,35 @@ scenario_summary_table("E") |>
 #| fig-height: 6
 #| column: screen
 #| out-width: "100%"
-plot_diagnostics(all_rep, all_agg, scenario_lookup_tbl, "E", exclude = "E5")
+E_combined     <- tar_read(E_combined)
+E_agg_combined <- tar_read(E_agg_combined)
+plot_diagnostics(E_combined, E_agg_combined, scenario_lookup_tbl, "E", exclude = "E5")
 ```
 
 ```{r e-table}
 results_table(all_agg, scenario_lookup_tbl, "E")
+```
+
+## H. Time Trend Distributional Misspecification
+
+The full model assumes study-level time trends are exchangeable draws from a normal distribution. These scenarios test what happens when that assumption is violated at the population level, using a 15 DiD + 15 PP design so that PP studies — which rely on trend estimation for effect identification — are directly exposed to the misspecification. Each scenario compares three models on the same simulated data: the **full normal** model (`meta_did`), the **full robust** model (`meta_did` with Student-t heterogeneity), and the **naive** model (`meta_did_general` with `time_trend = "fixed_zero"`).
+
+H1 generates trends from a negated log-normal (mean = −0.04, log-SD = 1), producing strong right-skewness: most studies have trends close to zero with occasional large negative trends. H2 uses a 50/50 mixture of two normal components centred at −0.01 and −0.10 — a bimodal distribution the normal model cannot represent regardless of sample size. H3 keeps the normal DGP but inflates `sigma_trend` to 0.10 (five times the default), testing the regime where trend uncertainty dominates effect uncertainty. H4 introduces a design-confounded trend: DiD studies are small (`n ~ U(30, 70)`) and have more negative trends, while PP studies are large (`n ~ U(150, 250)`) and have trends closer to zero; because the model pools trends across designs, it over-adjusts PP outcomes.
+
+```{r h-scenarios}
+scenario_summary_table("H") |>
+  kable(caption = "Category H: scenario definitions")
+```
+
+```{r h-diagnostics}
+#| fig-height: 7
+#| column: screen
+#| out-width: "100%"
+plot_diagnostics(all_rep, all_agg, scenario_lookup_tbl, "H")
+```
+
+```{r h-table}
+results_table(all_agg, scenario_lookup_tbl, "H")
 ```
 
 ## G. Bias Source Investigation

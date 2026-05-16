@@ -10,6 +10,8 @@
 #   targets::tar_make(names = starts_with("C_"))
 #   targets::tar_make(names = starts_with("D_"))
 #   targets::tar_make(names = starts_with("E_"))
+#   targets::tar_make(names = starts_with("H_"))
+#   targets::tar_make(names = starts_with("G_"))
 #
 # Render the validation report:
 #   targets::tar_make(names = "report")
@@ -32,8 +34,25 @@ tar_source("R/simulate.R")
 tar_source("R/fit.R")
 tar_source("R/fit_g.R")
 tar_source("R/fit_robust.R")
+tar_source("R/fit_naive.R")
 tar_source("R/assess.R")
 tar_source("R/plots.R")
+
+# ---------------------------------------------------------------------------
+# Helper: build a standard values tibble for tar_map_rep
+#
+# Embeds each scenario's config directly in the values so that targets tracks
+# per-scenario dependencies rather than the monolithic SCENARIO_CONFIGS list.
+# Changing one scenario's DGP or fit config now only invalidates that scenario's
+# targets; all others remain cached.
+# ---------------------------------------------------------------------------
+
+scenario_values <- function(ids) {
+  tibble::tibble(
+    scenario_id = ids,
+    config      = lapply(ids, function(s) SCENARIO_CONFIGS[[s]])
+  )
+}
 
 # ---------------------------------------------------------------------------
 # Pipeline definition
@@ -50,23 +69,43 @@ list(
   # ---- Category A: Calibration studies ----
   tarchetypes::tar_map_rep(
     name    = A_rep,
-    command = run_one_rep(scenario_id, targets::tar_seed_get(), metadid_src),
-    values  = tibble::tibble(scenario_id = scenario_ids("A")),
+    command = run_one_rep(scenario_id, config, targets::tar_seed_get(), metadid_src),
+    values  = scenario_values(scenario_ids("A")),
     names   = tidyselect::any_of("scenario_id"),
     batches = N_REPS,
     reps    = 1
   ),
   tar_target(A_agg, aggregate_scenario(A_rep)),
 
-  # ---- Category A: Robust comparator (new fits, does not invalidate A_rep) ----
-  # Excludes scenarios with correlated_effects = TRUE (incompatible with robust_heterogeneity)
+  # ---- Category A: Naive comparator (does not invalidate A_rep) ----
+  # Excludes scenarios with data_format = "individual" (no summary_data available)
+  tarchetypes::tar_map_rep(
+    name    = A_rep_naive,
+    command = run_naive_rep(scenario_id, config, targets::tar_seed_get(), metadid_src),
+    values  = {
+      ids <- Filter(
+        function(s) !isTRUE(SCENARIO_CONFIGS[[s]]$fit$data_format == "individual"),
+        scenario_ids("A")
+      )
+      scenario_values(ids)
+    },
+    names   = tidyselect::any_of("scenario_id"),
+    batches = N_REPS,
+    reps    = 1
+  ),
+
+  # ---- Category A: Robust comparator (does not invalidate A_rep) ----
+  # Excludes scenarios with correlated_effects = TRUE (incompatible with robust)
   tarchetypes::tar_map_rep(
     name    = A_rep_robust,
-    command = run_robust_rep(scenario_id, targets::tar_seed_get(), metadid_src),
-    values  = tibble::tibble(scenario_id = Filter(
-      function(s) !isTRUE(SCENARIO_CONFIGS[[s]]$fit$correlated_effects),
-      scenario_ids("A")
-    )),
+    command = run_robust_rep(scenario_id, config, targets::tar_seed_get(), metadid_src),
+    values  = {
+      ids <- Filter(
+        function(s) !isTRUE(SCENARIO_CONFIGS[[s]]$fit$correlated_effects),
+        scenario_ids("A")
+      )
+      scenario_values(ids)
+    },
     names   = tidyselect::any_of("scenario_id"),
     batches = N_REPS,
     reps    = 1
@@ -75,7 +114,8 @@ list(
     A_combined,
     dplyr::bind_rows(
       dplyr::mutate(A_rep,        model_label = "normal"),
-      dplyr::mutate(A_rep_robust, model_label = "robust")
+      dplyr::mutate(A_rep_robust, model_label = "robust"),
+      A_rep_naive  # model_label = "naive" set in run_naive_rep()
     )
   ),
   tar_target(A_agg_combined, aggregate_scenario(A_combined)),
@@ -83,23 +123,26 @@ list(
   # ---- Category F: Large-N bias probes ----
   tarchetypes::tar_map_rep(
     name    = F_rep,
-    command = run_one_rep(scenario_id, targets::tar_seed_get(), metadid_src),
-    values  = tibble::tibble(scenario_id = scenario_ids("F")),
+    command = run_one_rep(scenario_id, config, targets::tar_seed_get(), metadid_src),
+    values  = scenario_values(scenario_ids("F")),
     names   = tidyselect::any_of("scenario_id"),
     batches = N_REPS,
     reps    = 1
   ),
   tar_target(F_agg, aggregate_scenario(F_rep)),
 
-  # ---- Category F: Robust comparator (new fits, does not invalidate F_rep) ----
-  # Excludes scenarios with correlated_effects = TRUE (incompatible with robust_heterogeneity)
+  # ---- Category F: Robust comparator (does not invalidate F_rep) ----
+  # Excludes scenarios with correlated_effects = TRUE (incompatible with robust)
   tarchetypes::tar_map_rep(
     name    = F_rep_robust,
-    command = run_robust_rep(scenario_id, targets::tar_seed_get(), metadid_src),
-    values  = tibble::tibble(scenario_id = Filter(
-      function(s) !isTRUE(SCENARIO_CONFIGS[[s]]$fit$correlated_effects),
-      scenario_ids("F")
-    )),
+    command = run_robust_rep(scenario_id, config, targets::tar_seed_get(), metadid_src),
+    values  = {
+      ids <- Filter(
+        function(s) !isTRUE(SCENARIO_CONFIGS[[s]]$fit$correlated_effects),
+        scenario_ids("F")
+      )
+      scenario_values(ids)
+    },
     names   = tidyselect::any_of("scenario_id"),
     batches = N_REPS,
     reps    = 1
@@ -116,8 +159,8 @@ list(
   # ---- Category B: Comparative studies ----
   tarchetypes::tar_map_rep(
     name    = B_rep,
-    command = run_one_rep(scenario_id, targets::tar_seed_get(), metadid_src),
-    values  = tibble::tibble(scenario_id = scenario_ids("B")),
+    command = run_one_rep(scenario_id, config, targets::tar_seed_get(), metadid_src),
+    values  = scenario_values(scenario_ids("B")),
     names   = tidyselect::any_of("scenario_id"),
     batches = N_REPS,
     reps    = 1
@@ -127,8 +170,8 @@ list(
   # ---- Category C: Outlier and heavy-tailed ----
   tarchetypes::tar_map_rep(
     name    = C_rep,
-    command = run_one_rep(scenario_id, targets::tar_seed_get(), metadid_src),
-    values  = tibble::tibble(scenario_id = scenario_ids("C")),
+    command = run_one_rep(scenario_id, config, targets::tar_seed_get(), metadid_src),
+    values  = scenario_values(scenario_ids("C")),
     names   = tidyselect::any_of("scenario_id"),
     batches = N_REPS,
     reps    = 1
@@ -138,59 +181,157 @@ list(
   # ---- Category D: Assumption violations ----
   tarchetypes::tar_map_rep(
     name    = D_rep,
-    command = run_one_rep(scenario_id, targets::tar_seed_get(), metadid_src),
-    values  = tibble::tibble(scenario_id = scenario_ids("D")),
+    command = run_one_rep(scenario_id, config, targets::tar_seed_get(), metadid_src),
+    values  = scenario_values(scenario_ids("D")),
     names   = tidyselect::any_of("scenario_id"),
     batches = N_REPS,
     reps    = 1
   ),
   tar_target(D_agg, aggregate_scenario(D_rep)),
 
+  # ---- Category D: Naive comparator (does not invalidate D_rep) ----
+  # Excludes scenarios with data_format = "individual" (no summary_data available)
+  tarchetypes::tar_map_rep(
+    name    = D_rep_naive,
+    command = run_naive_rep(scenario_id, config, targets::tar_seed_get(), metadid_src),
+    values  = {
+      ids <- Filter(
+        function(s) !isTRUE(SCENARIO_CONFIGS[[s]]$fit$data_format == "individual"),
+        scenario_ids("D")
+      )
+      scenario_values(ids)
+    },
+    names   = tidyselect::any_of("scenario_id"),
+    batches = N_REPS,
+    reps    = 1
+  ),
+
+  # ---- Category D: Robust comparator (does not invalidate D_rep) ----
+  # Excludes scenarios with correlated_effects = TRUE (incompatible with robust)
+  tarchetypes::tar_map_rep(
+    name    = D_rep_robust,
+    command = run_robust_rep(scenario_id, config, targets::tar_seed_get(), metadid_src),
+    values  = {
+      ids <- Filter(
+        function(s) !isTRUE(SCENARIO_CONFIGS[[s]]$fit$correlated_effects),
+        scenario_ids("D")
+      )
+      scenario_values(ids)
+    },
+    names   = tidyselect::any_of("scenario_id"),
+    batches = N_REPS,
+    reps    = 1
+  ),
+  tar_target(
+    D_combined,
+    dplyr::bind_rows(
+      dplyr::mutate(D_rep,        model_label = "normal"),
+      dplyr::mutate(D_rep_robust, model_label = "robust"),
+      D_rep_naive  # model_label = "naive" set in run_naive_rep()
+    )
+  ),
+  tar_target(D_agg_combined, aggregate_scenario(D_combined)),
+
   # ---- Category E: Edge cases ----
   tarchetypes::tar_map_rep(
     name    = E_rep,
-    command = run_one_rep(scenario_id, targets::tar_seed_get(), metadid_src),
-    values  = tibble::tibble(scenario_id = scenario_ids("E")),
+    command = run_one_rep(scenario_id, config, targets::tar_seed_get(), metadid_src),
+    values  = scenario_values(scenario_ids("E")),
     names   = tidyselect::any_of("scenario_id"),
     batches = N_REPS,
     reps    = 1
   ),
   tar_target(E_agg, aggregate_scenario(E_rep)),
 
+  # ---- Category E: Naive comparator (does not invalidate E_rep) ----
+  # Excludes scenarios with data_format = "individual" (no summary_data available)
+  tarchetypes::tar_map_rep(
+    name    = E_rep_naive,
+    command = run_naive_rep(scenario_id, config, targets::tar_seed_get(), metadid_src),
+    values  = {
+      ids <- Filter(
+        function(s) !isTRUE(SCENARIO_CONFIGS[[s]]$fit$data_format == "individual"),
+        scenario_ids("E")
+      )
+      scenario_values(ids)
+    },
+    names   = tidyselect::any_of("scenario_id"),
+    batches = N_REPS,
+    reps    = 1
+  ),
+
+  # ---- Category E: Robust comparator (does not invalidate E_rep) ----
+  # Excludes scenarios with correlated_effects = TRUE (incompatible with robust)
+  tarchetypes::tar_map_rep(
+    name    = E_rep_robust,
+    command = run_robust_rep(scenario_id, config, targets::tar_seed_get(), metadid_src),
+    values  = {
+      ids <- Filter(
+        function(s) !isTRUE(SCENARIO_CONFIGS[[s]]$fit$correlated_effects),
+        scenario_ids("E")
+      )
+      scenario_values(ids)
+    },
+    names   = tidyselect::any_of("scenario_id"),
+    batches = N_REPS,
+    reps    = 1
+  ),
+  tar_target(
+    E_combined,
+    dplyr::bind_rows(
+      dplyr::mutate(E_rep,        model_label = "normal"),
+      dplyr::mutate(E_rep_robust, model_label = "robust"),
+      E_rep_naive  # model_label = "naive" set in run_naive_rep()
+    )
+  ),
+  tar_target(E_agg_combined, aggregate_scenario(E_combined)),
+
+  # ---- Category H: Time trend distributional misspecification ----
+  tarchetypes::tar_map_rep(
+    name    = H_rep,
+    command = run_one_rep(scenario_id, config, targets::tar_seed_get(), metadid_src),
+    values  = scenario_values(scenario_ids("H")),
+    names   = tidyselect::any_of("scenario_id"),
+    batches = N_REPS,
+    reps    = 1
+  ),
+  tar_target(H_agg, aggregate_scenario(H_rep)),
+
   # ---- Scenario lookup table ----
   tar_target(scenario_lookup_tbl, scenario_lookup()),
 
   # ---- Category G: Bias source investigation ----
-  # Uses run_g_rep() (from fit_g.R) rather than run_one_rep() so that changes
-  # to the priors-aware fitting code do not invalidate A-F targets.
+  # Uses run_g_rep() (from fit_g.R) so that changes to priors-aware fitting
+  # code do not invalidate A-F targets.
   tarchetypes::tar_map_rep(
     name    = G_rep,
-    command = run_g_rep(scenario_id, targets::tar_seed_get(), metadid_src),
-    values  = tibble::tibble(scenario_id = scenario_ids("G")),
+    command = run_g_rep(scenario_id, config, targets::tar_seed_get(), metadid_src),
+    values  = scenario_values(scenario_ids("G")),
     names   = tidyselect::any_of("scenario_id"),
-    batches = N_REPS,
+    batches = N_REPS * 2,
     reps    = 1L
   ),
   tar_target(G_agg, aggregate_scenario(G_rep)),
 
   # ---- Diagnostic plots (% bias, coverage, Rhat) per category ----
-  tar_target(diag_plot_A, plot_diagnostics(A_rep, A_agg, scenario_lookup_tbl, "A")),
-  tar_target(diag_plot_G, plot_diagnostics(G_rep, G_agg, scenario_lookup_tbl, "G")),
-  tar_target(diag_plot_F, plot_diagnostics(F_rep, F_agg, scenario_lookup_tbl, "F")),
-  tar_target(diag_plot_B, plot_diagnostics(B_rep, B_agg, scenario_lookup_tbl, "B")),
-  tar_target(diag_plot_C, plot_diagnostics(C_rep, C_agg, scenario_lookup_tbl, "C")),
-  tar_target(diag_plot_D, plot_diagnostics(D_rep, D_agg, scenario_lookup_tbl, "D")),
-  tar_target(diag_plot_E, plot_diagnostics(E_rep, E_agg, scenario_lookup_tbl, "E")),
+  tar_target(diag_plot_A, plot_diagnostics(A_rep,  A_agg,  scenario_lookup_tbl, "A")),
+  tar_target(diag_plot_F, plot_diagnostics(F_rep,  F_agg,  scenario_lookup_tbl, "F")),
+  tar_target(diag_plot_B, plot_diagnostics(B_rep,  B_agg,  scenario_lookup_tbl, "B")),
+  tar_target(diag_plot_C, plot_diagnostics(C_rep,  C_agg,  scenario_lookup_tbl, "C")),
+  tar_target(diag_plot_D, plot_diagnostics(D_rep,  D_agg,  scenario_lookup_tbl, "D")),
+  tar_target(diag_plot_E, plot_diagnostics(E_rep,  E_agg,  scenario_lookup_tbl, "E")),
+  tar_target(diag_plot_G, plot_diagnostics(G_rep,  G_agg,  scenario_lookup_tbl, "G")),
+  tar_target(diag_plot_H, plot_diagnostics(H_rep,  H_agg,  scenario_lookup_tbl, "H")),
 
   # ---- Combined results ----
   tar_target(
     all_agg,
-    dplyr::bind_rows(A_agg, F_agg, B_agg, C_agg, D_agg, E_agg, G_agg)
+    dplyr::bind_rows(A_agg, F_agg, B_agg, C_agg, D_agg, E_agg, G_agg, H_agg)
   ),
 
   tar_target(
     all_rep,
-    dplyr::bind_rows(A_rep, F_rep, B_rep, C_rep, D_rep, E_rep, G_rep)
+    dplyr::bind_rows(A_rep, F_rep, B_rep, C_rep, D_rep, E_rep, G_rep, H_rep)
   ),
 
   # ---- Machine-readable exports ----

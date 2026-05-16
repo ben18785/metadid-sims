@@ -11,10 +11,9 @@ library(metadid)
 #' @param scenario_id String identifying the scenario in SCENARIO_CONFIGS
 #' @param rep_seed    Integer seed for this replication
 #' @param pkg         Ignored; used to create a dependency on metadid_src
-run_g_rep <- function(scenario_id, rep_seed, pkg = NULL) {
+run_g_rep <- function(scenario_id, config, rep_seed, pkg = NULL) {
 
-  config <- SCENARIO_CONFIGS[[scenario_id]]
-  sim    <- simulate_scenario(scenario_id, rep_seed)
+  sim <- simulate_scenario(scenario_id, rep_seed, config)
 
   # Build fit args, identical to fit_scenario() but also passing priors
   fit_config <- config$fit
