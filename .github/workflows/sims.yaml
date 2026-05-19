@@ -1,0 +1,358 @@
+name: simulations
+
+# Runs the metadid-sims targets pipeline once a day, but only if the
+# upstream `ben18785/metadid` repo has a new commit on `main` since the
+# last successful run. Each scenario category (A–H) runs in parallel as a
+# separate matrix job; a final job merges their `_targets/` stores and
+# renders the Quarto validation report.
+#
+# Trigger manually from the Actions tab and tick "force" to re-run against
+# the current metadid HEAD even if nothing has changed.
+
+on:
+  schedule:
+    # 03:17 UTC daily (off-peak; the random minute reduces queue contention)
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Run even if metadid main has not changed since last run"
+        type: boolean
+        default: false
+
+# Don't run two of these concurrently — they'd fight over the same cache key.
+concurrency:
+  group: simulations
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+
+  # ---------------------------------------------------------------------------
+  # check: ask GitHub for the metadid main HEAD SHA and decide whether to run
+  # ---------------------------------------------------------------------------
+  check:
+    name: Check for new metadid commit
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+      metadid_sha: ${{ steps.fetch.outputs.sha }}
+    steps:
+      - name: Fetch latest metadid main SHA
+        id: fetch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha=$(curl -fsSL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/ben18785/metadid/commits/main \
+            | jq -r '.sha')
+          if [ -z "$sha" ] || [ "$sha" = "null" ]; then
+            echo "::error::Could not fetch metadid main SHA"
+            exit 1
+          fi
+          echo "metadid main SHA: $sha"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Look up last-run marker for this SHA
+        id: cache_restore
+        uses: actions/cache/restore@v4
+        with:
+          path: marker
+          key: metadid-last-run-v1-${{ steps.fetch.outputs.sha }}
+
+      - name: Decide whether to run
+        id: decide
+        env:
+          FORCE: ${{ inputs.force }}
+          HIT: ${{ steps.cache_restore.outputs.cache-hit }}
+        run: |
+          set -euo pipefail
+          if [ "${FORCE:-false}" = "true" ]; then
+            echo "Force-run requested via workflow_dispatch"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          elif [ "${HIT:-false}" = "true" ]; then
+            echo "metadid main has not changed since the last successful run; skipping"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "New metadid commit detected; running pipeline"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # simulate: one parallel matrix job per scenario category
+  # ---------------------------------------------------------------------------
+  simulate:
+    name: "Category ${{ matrix.category }}"
+    needs: check
+    if: needs.check.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    # GitHub Actions hard-caps a single job at 6h on Linux runners. If a
+    # category overruns this we'd need to subdivide the matrix further
+    # (e.g. one job per scenario).
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        category: [A, B, C, D, E, F, G, H]
+    env:
+      METADID_SHA: ${{ needs.check.outputs.metadid_sha }}
+    steps:
+      - name: Checkout metadid-sims
+        uses: actions/checkout@v4
+        with:
+          path: metadid-sims
+
+      - name: Checkout metadid (pinned to current main)
+        uses: actions/checkout@v4
+        with:
+          repository: ben18785/metadid
+          ref: ${{ needs.check.outputs.metadid_sha }}
+          path: metadid
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+          extra-repositories: "https://mc-stan.org/r-packages/"
+
+      - uses: r-lib/actions/setup-pandoc@v2
+
+      - name: Install R package dependencies
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          working-directory: metadid
+          extra-packages: |
+            any::cmdstanr
+            any::instantiate
+            any::targets
+            any::tarchetypes
+            any::MASS
+            any::mvtnorm
+            any::scales
+            any::readr
+            any::dplyr
+            any::tidyr
+            any::ggplot2
+            any::purrr
+            any::rlang
+            any::tibble
+            any::stringr
+            any::tidyselect
+
+      - name: Cache CmdStan
+        id: cmdstan-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cmdstan
+          key: cmdstan-${{ runner.os }}-v1
+
+      - name: Install CmdStan
+        if: steps.cmdstan-cache.outputs.cache-hit != 'true'
+        run: Rscript -e 'cmdstanr::install_cmdstan(cores = 2)'
+
+      - name: Install metadid from local checkout
+        run: R CMD INSTALL ./metadid
+
+      - name: Run targets for category ${{ matrix.category }}
+        working-directory: metadid-sims
+        run: |
+          Rscript -e '
+            library(targets)
+            tar_make(
+              names = tidyselect::starts_with("${{ matrix.category }}_")
+            )
+          '
+
+      - name: Upload _targets store slice
+        uses: actions/upload-artifact@v4
+        with:
+          name: targets-store-${{ matrix.category }}
+          path: |
+            metadid-sims/_targets/meta/
+            metadid-sims/_targets/objects/
+          if-no-files-found: error
+          retention-days: 14
+
+  # ---------------------------------------------------------------------------
+  # report: merge per-category stores, render the Quarto validation report
+  # ---------------------------------------------------------------------------
+  report:
+    name: Render validation report
+    needs: [check, simulate]
+    if: needs.check.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      METADID_SHA: ${{ needs.check.outputs.metadid_sha }}
+    steps:
+      - name: Checkout metadid-sims
+        uses: actions/checkout@v4
+        with:
+          path: metadid-sims
+
+      - name: Checkout metadid
+        uses: actions/checkout@v4
+        with:
+          repository: ben18785/metadid
+          ref: ${{ needs.check.outputs.metadid_sha }}
+          path: metadid
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+          extra-repositories: "https://mc-stan.org/r-packages/"
+
+      - uses: r-lib/actions/setup-pandoc@v2
+
+      - uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: Install R package dependencies
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          working-directory: metadid
+          extra-packages: |
+            any::cmdstanr
+            any::instantiate
+            any::targets
+            any::tarchetypes
+            any::MASS
+            any::mvtnorm
+            any::scales
+            any::readr
+            any::dplyr
+            any::tidyr
+            any::ggplot2
+            any::purrr
+            any::rlang
+            any::tibble
+            any::stringr
+            any::tidyselect
+            any::quarto
+            any::knitr
+            any::kableExtra
+            any::rmarkdown
+
+      - name: Cache CmdStan
+        id: cmdstan-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cmdstan
+          key: cmdstan-${{ runner.os }}-v1
+
+      - name: Install CmdStan
+        if: steps.cmdstan-cache.outputs.cache-hit != 'true'
+        run: Rscript -e 'cmdstanr::install_cmdstan(cores = 2)'
+
+      - name: Install metadid from local checkout
+        run: R CMD INSTALL ./metadid
+
+      - name: Download all _targets store slices
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: targets-store-*
+
+      - name: Merge _targets stores
+        working-directory: metadid-sims
+        run: |
+          set -euo pipefail
+          mkdir -p _targets/meta _targets/objects
+          # Copy every category's object files (target names are unique per
+          # category, so cross-category collisions only happen on shared
+          # dependencies like `metadid_src`, which all carry the same hash).
+          for d in ../artifacts/targets-store-*; do
+            if [ -d "$d/objects" ]; then
+              cp -rn "$d"/objects/. _targets/objects/ || true
+            fi
+          done
+          # Merge meta files: keep one header line, then dedupe rows by
+          # the first column (target name).
+          first=$(ls -1 ../artifacts/targets-store-*/meta/meta 2>/dev/null | head -1)
+          if [ -z "$first" ]; then
+            echo "::error::No meta files found in downloaded artifacts"
+            exit 1
+          fi
+          head -n 1 "$first" > _targets/meta/meta
+          for f in ../artifacts/targets-store-*/meta/meta; do
+            tail -n +2 "$f"
+          done | awk -F'|' '!seen[$1]++' >> _targets/meta/meta
+          echo "Merged store contains $(wc -l < _targets/meta/meta) meta rows and $(ls _targets/objects | wc -l) object files."
+
+      - name: Build cross-category targets and render report
+        working-directory: metadid-sims
+        run: |
+          Rscript -e '
+            library(targets)
+            tar_make(names = c(
+              "scenario_lookup_tbl",
+              "diag_plot_A", "diag_plot_B", "diag_plot_C", "diag_plot_D",
+              "diag_plot_E", "diag_plot_F", "diag_plot_G", "diag_plot_H",
+              "all_agg", "all_rep",
+              "export_agg_csv", "export_rep_rds", "archive_results",
+              "report"
+            ))
+          '
+
+      - name: Upload validation report and outputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-report
+          path: |
+            metadid-sims/reports/validation-report.html
+            metadid-sims/output/aggregated_results.csv
+            metadid-sims/output/replication_results.rds
+            metadid-sims/output/archive.csv
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Stage site for GitHub Pages
+        run: |
+          set -euo pipefail
+          mkdir -p site
+          cp metadid-sims/reports/validation-report.html site/index.html
+          # Also surface the machine-readable outputs alongside the report
+          # so they're downloadable from the published site.
+          cp metadid-sims/output/aggregated_results.csv  site/ 2>/dev/null || true
+          cp metadid-sims/output/replication_results.rds site/ 2>/dev/null || true
+          cp metadid-sims/output/archive.csv             site/ 2>/dev/null || true
+          # Pages won't serve files starting with `_`; nothing in our outputs
+          # starts with `_`, but disable Jekyll processing as a precaution.
+          touch site/.nojekyll
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Write last-run marker
+        run: |
+          mkdir -p marker
+          echo "${METADID_SHA}" > marker/last-metadid-sha
+
+      - name: Save last-run marker (so we don't re-run this SHA tomorrow)
+        uses: actions/cache/save@v4
+        with:
+          path: marker
+          key: metadid-last-run-v1-${{ env.METADID_SHA }}
+
+  # ---------------------------------------------------------------------------
+  # deploy: publish the rendered report to GitHub Pages
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: Deploy report to GitHub Pages
+    needs: [check, report]
+    if: needs.check.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -8,3 +8,4 @@ output/
 reports/validation-report_files/
 reports/validation-report.html
 .DS_Store
+.positai
