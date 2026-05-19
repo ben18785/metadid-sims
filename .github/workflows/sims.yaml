@@ -30,6 +30,13 @@ permissions:
   pages: write
   id-token: write
 
+# Defensive knobs against the intermittent pak/pkgcache download flake
+# where a package shows as downloaded but is missing at install time.
+# pkgcache uses these env vars to retry HTTP requests on failure.
+env:
+  PKGCACHE_HTTP_RETRIES: "5"
+  PKGCACHE_HTTP_DELAY: "3"
+
 jobs:
 
   # ---------------------------------------------------------------------------
@@ -127,6 +134,7 @@ jobs:
         uses: r-lib/actions/setup-r-dependencies@v2
         with:
           working-directory: metadid
+          cache-version: 2
           extra-packages: |
             any::cmdstanr
             any::instantiate
@@ -144,6 +152,8 @@ jobs:
             any::tibble
             any::stringr
             any::tidyselect
+            any::gridExtra
+            any::forcats
 
       - name: Cache CmdStan
         id: cmdstan-cache
@@ -216,6 +226,7 @@ jobs:
         uses: r-lib/actions/setup-r-dependencies@v2
         with:
           working-directory: metadid
+          cache-version: 2
           extra-packages: |
             any::cmdstanr
             any::instantiate
@@ -233,6 +244,8 @@ jobs:
             any::tibble
             any::stringr
             any::tidyselect
+            any::gridExtra
+            any::forcats
             any::quarto
             any::knitr
             any::kableExtra
