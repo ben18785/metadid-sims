@@ -128,10 +128,11 @@ jobs:
     needs: [check, list_scenarios]
     if: needs.check.outputs.run == 'true'
     runs-on: ubuntu-latest
-    # No single scenario should approach this. The previous full-category
-    # timeout (350 min) was driven by the slowest category (~6h for A/F/G);
-    # individual scenarios in those categories run in ~20–50 min.
-    timeout-minutes: 90
+    # GitHub Actions caps single jobs at 6h on Linux runners. Long F/G
+    # scenarios have been observed at ~1.5h, so 240 min gives ~2.5x
+    # headroom while staying clear of the hard cap. Jobs that hit
+    # timeout-minutes are reported as "The operation was canceled."
+    timeout-minutes: 240
     strategy:
       fail-fast: false
       matrix:
@@ -217,9 +218,17 @@ jobs:
   report:
     name: Render validation report
     needs: [check, simulate]
-    if: needs.check.outputs.run == 'true'
+    # `always()` lets the report job run even if some simulate matrix
+    # entries failed or were cancelled. tar_make in the merge step will
+    # auto-recompute any per-scenario slices that didn't make it into the
+    # uploaded artifacts, using the same R environment as the simulate
+    # jobs — so a small number of missing scenarios is recoverable
+    # without losing the run.
+    if: ${{ always() && needs.check.outputs.run == 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # Longer than before because the report job may need to rebuild any
+    # missing per-scenario slices on top of the merge/render work.
+    timeout-minutes: 240
     env:
       METADID_SHA: ${{ needs.check.outputs.metadid_sha }}
     steps:
