@@ -154,6 +154,8 @@ jobs:
             any::tidyselect
             any::gridExtra
             any::forcats
+            any::kableExtra
+            any::knitr
 
       - name: Cache CmdStan
         id: cmdstan-cache
