@@ -26,9 +26,9 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  # `contents: write` is required to push the rendered report to the
+  # `gh-pages` branch, which is the archive of all past runs.
+  contents: write
 
 # Defensive knobs against the intermittent pak/pkgcache download flake
 # where a package shows as downloaded but is missing at install time.
@@ -156,6 +156,7 @@ jobs:
             any::forcats
             any::kableExtra
             any::knitr
+            any::quarto
 
       - name: Cache CmdStan
         id: cmdstan-cache
@@ -267,6 +268,22 @@ jobs:
       - name: Install metadid from local checkout
         run: R CMD INSTALL ./metadid
 
+      - name: Restore prior archive.csv from gh-pages (if present)
+        working-directory: metadid-sims
+        run: |
+          set -euo pipefail
+          mkdir -p output
+          # The `archive_results` target in _targets.R appends to this file
+          # if it exists; otherwise it starts fresh. Pull the previous run's
+          # copy so the cross-run history accumulates.
+          url="https://raw.githubusercontent.com/${{ github.repository }}/gh-pages/archive.csv"
+          if curl -fsSL -o output/archive.csv "$url"; then
+            echo "Restored prior archive.csv ($(wc -l < output/archive.csv) lines incl. header)"
+          else
+            echo "No prior archive.csv on gh-pages; starting fresh"
+            rm -f output/archive.csv
+          fi
+
       - name: Download all _targets store slices
         uses: actions/download-artifact@v4
         with:
@@ -326,24 +343,115 @@ jobs:
           if-no-files-found: warn
           retention-days: 90
 
-      - name: Stage site for GitHub Pages
+      - name: Checkout existing gh-pages branch (if it exists)
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: gh-pages-current
+        continue-on-error: true
+
+      - name: Build cumulative site
+        env:
+          METADID_SHA: ${{ needs.check.outputs.metadid_sha }}
         run: |
           set -euo pipefail
-          mkdir -p site
-          cp metadid-sims/reports/validation-report.html site/index.html
-          # Also surface the machine-readable outputs alongside the report
-          # so they're downloadable from the published site.
-          cp metadid-sims/output/aggregated_results.csv  site/ 2>/dev/null || true
-          cp metadid-sims/output/replication_results.rds site/ 2>/dev/null || true
-          cp metadid-sims/output/archive.csv             site/ 2>/dev/null || true
-          # Pages won't serve files starting with `_`; nothing in our outputs
-          # starts with `_`, but disable Jekyll processing as a precaution.
-          touch site/.nojekyll
 
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+          SHORT_SHA="${METADID_SHA:0:7}"
+          DATE="$(date -u +%Y-%m-%d)"
+          NEW_DIR="${DATE}-${SHORT_SHA}"
+
+          # --- New per-run archive entry ---
+          mkdir -p "public/archive/${NEW_DIR}"
+          cp metadid-sims/reports/validation-report.html  "public/archive/${NEW_DIR}/index.html"
+          cp metadid-sims/output/aggregated_results.csv   "public/archive/${NEW_DIR}/" 2>/dev/null || true
+          cp metadid-sims/output/replication_results.rds  "public/archive/${NEW_DIR}/" 2>/dev/null || true
+
+          # --- "latest/" always points at the newest report ---
+          mkdir -p public/latest
+          cp metadid-sims/reports/validation-report.html  public/latest/index.html
+          cp metadid-sims/output/aggregated_results.csv   public/latest/ 2>/dev/null || true
+          cp metadid-sims/output/replication_results.rds  public/latest/ 2>/dev/null || true
+
+          # --- Cumulative archive.csv lives at the site root ---
+          cp metadid-sims/output/archive.csv  public/archive.csv 2>/dev/null || true
+
+          # --- Build root index.html listing every archive entry ---
+          {
+            existing=""
+            if [ -d gh-pages-current/archive ]; then
+              existing=$(ls -1 gh-pages-current/archive 2>/dev/null || true)
+            fi
+            echo "$existing"
+            echo "${NEW_DIR}"
+          } | sed '/^$/d' | sort -u -r > archive_list.txt
+
+          cat > public/index.html <<'HTML_HEAD'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <title>metadid-sims validation reports</title>
+            <style>
+              body{font-family:system-ui,-apple-system,sans-serif;max-width:780px;margin:2rem auto;padding:0 1rem;color:#24292f;line-height:1.5}
+              h1{margin-bottom:.2rem}
+              .subtitle{color:#57606a;margin-top:0}
+              .latest{background:#ddf4ff;border:1px solid #54aeff66;border-radius:6px;padding:.75rem 1rem;margin:1.5rem 0}
+              .latest a{font-weight:600}
+              table{width:100%;border-collapse:collapse;margin-top:1rem}
+              th,td{padding:.5rem .75rem;border-bottom:1px solid #eaeef2;text-align:left}
+              th{background:#f6f8fa;font-weight:600}
+              a{color:#0969da;text-decoration:none}
+              a:hover{text-decoration:underline}
+              code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9em;background:#f6f8fa;padding:.1em .35em;border-radius:3px}
+            </style>
+          </head>
+          <body>
+            <h1>metadid validation reports</h1>
+            <p class="subtitle">Daily simulation runs against each new commit on metadid:main.</p>
+            <div class="latest"><a href="latest/">→ Latest report</a> &middot; <a href="archive.csv">cumulative aggregated CSV</a></div>
+            <h2>Archive</h2>
+            <table>
+              <thead><tr><th>Date</th><th>metadid commit</th><th>Report</th><th>Aggregated CSV</th></tr></thead>
+              <tbody>
+          HTML_HEAD
+
+          while IFS= read -r d; do
+            [ -z "$d" ] && continue
+            date_part="${d:0:10}"
+            sha_part="${d:11}"
+            cat >> public/index.html <<HTML_ROW
+              <tr>
+                <td>${date_part}</td>
+                <td><a href="https://github.com/ben18785/metadid/commit/${sha_part}"><code>${sha_part}</code></a></td>
+                <td><a href="archive/${d}/">HTML</a></td>
+                <td><a href="archive/${d}/aggregated_results.csv">CSV</a></td>
+              </tr>
+          HTML_ROW
+          done < archive_list.txt
+
+          cat >> public/index.html <<'HTML_FOOT'
+              </tbody>
+            </table>
+          </body>
+          </html>
+          HTML_FOOT
+
+          touch public/.nojekyll
+          echo "Built site with $(wc -l < archive_list.txt) archive entries"
+
+      - name: Publish to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
         with:
-          path: site
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: ./public
+          # keep_files: true preserves every past archive/ entry on the
+          # branch; we only ship the new run's directory plus the
+          # regenerated root index and latest/.
+          keep_files: true
+          commit_message: "Publish validation report for metadid@${{ needs.check.outputs.metadid_sha }}"
+          user_name: "github-actions[bot]"
+          user_email: "github-actions[bot]@users.noreply.github.com"
 
       - name: Write last-run marker
         run: |
@@ -355,19 +463,3 @@ jobs:
         with:
           path: marker
           key: metadid-last-run-v1-${{ env.METADID_SHA }}
-
-  # ---------------------------------------------------------------------------
-  # deploy: publish the rendered report to GitHub Pages
-  # ---------------------------------------------------------------------------
-  deploy:
-    name: Deploy report to GitHub Pages
-    needs: [check, report]
-    if: needs.check.outputs.run == 'true'
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
