@@ -130,33 +130,19 @@ jobs:
 
       - uses: r-lib/actions/setup-pandoc@v2
 
+      # tarchetypes::tar_quarto() in _targets.R probes the qmd via the Quarto
+      # CLI at pipeline-construction time, so every job that calls tar_make()
+      # needs the binary on PATH — not just the one that renders the report.
+      - uses: quarto-dev/quarto-actions/setup@v2
+
+      # Single source of truth for R dependencies: metadid-sims/DESCRIPTION.
+      # Adding a `library()` or `pkg::` call in the repo is now automatically
+      # reflected in CI as long as the package is listed in Imports there.
       - name: Install R package dependencies
         uses: r-lib/actions/setup-r-dependencies@v2
         with:
-          working-directory: metadid
-          cache-version: 2
-          extra-packages: |
-            any::cmdstanr
-            any::instantiate
-            any::targets
-            any::tarchetypes
-            any::MASS
-            any::mvtnorm
-            any::scales
-            any::readr
-            any::dplyr
-            any::tidyr
-            any::ggplot2
-            any::purrr
-            any::rlang
-            any::tibble
-            any::stringr
-            any::tidyselect
-            any::gridExtra
-            any::forcats
-            any::kableExtra
-            any::knitr
-            any::quarto
+          working-directory: metadid-sims
+          cache-version: 3
 
       - name: Cache CmdStan
         id: cmdstan-cache
@@ -228,31 +214,8 @@ jobs:
       - name: Install R package dependencies
         uses: r-lib/actions/setup-r-dependencies@v2
         with:
-          working-directory: metadid
-          cache-version: 2
-          extra-packages: |
-            any::cmdstanr
-            any::instantiate
-            any::targets
-            any::tarchetypes
-            any::MASS
-            any::mvtnorm
-            any::scales
-            any::readr
-            any::dplyr
-            any::tidyr
-            any::ggplot2
-            any::purrr
-            any::rlang
-            any::tibble
-            any::stringr
-            any::tidyselect
-            any::gridExtra
-            any::forcats
-            any::quarto
-            any::knitr
-            any::kableExtra
-            any::rmarkdown
+          working-directory: metadid-sims
+          cache-version: 3
 
       - name: Cache CmdStan
         id: cmdstan-cache
@@ -327,6 +290,7 @@ jobs:
               "diag_plot_E", "diag_plot_F", "diag_plot_G", "diag_plot_H",
               "all_agg", "all_rep",
               "export_agg_csv", "export_rep_rds", "archive_results",
+              "scenario_settings_csv",
               "report"
             ))
           '
@@ -340,6 +304,7 @@ jobs:
             metadid-sims/output/aggregated_results.csv
             metadid-sims/output/replication_results.rds
             metadid-sims/output/archive.csv
+            metadid-sims/output/scenario_settings.csv
           if-no-files-found: warn
           retention-days: 90
 
@@ -365,15 +330,18 @@ jobs:
           cp metadid-sims/reports/validation-report.html  "public/archive/${NEW_DIR}/index.html"
           cp metadid-sims/output/aggregated_results.csv   "public/archive/${NEW_DIR}/" 2>/dev/null || true
           cp metadid-sims/output/replication_results.rds  "public/archive/${NEW_DIR}/" 2>/dev/null || true
+          cp metadid-sims/output/scenario_settings.csv    "public/archive/${NEW_DIR}/" 2>/dev/null || true
 
           # --- "latest/" always points at the newest report ---
           mkdir -p public/latest
           cp metadid-sims/reports/validation-report.html  public/latest/index.html
           cp metadid-sims/output/aggregated_results.csv   public/latest/ 2>/dev/null || true
           cp metadid-sims/output/replication_results.rds  public/latest/ 2>/dev/null || true
+          cp metadid-sims/output/scenario_settings.csv    public/latest/ 2>/dev/null || true
 
-          # --- Cumulative archive.csv lives at the site root ---
-          cp metadid-sims/output/archive.csv  public/archive.csv 2>/dev/null || true
+          # --- Cross-run files at the site root (overwritten each run) ---
+          cp metadid-sims/output/archive.csv           public/archive.csv          2>/dev/null || true
+          cp metadid-sims/output/scenario_settings.csv public/scenario_settings.csv 2>/dev/null || true
 
           # --- Build root index.html listing every archive entry ---
           {
@@ -408,7 +376,7 @@ jobs:
           <body>
             <h1>metadid validation reports</h1>
             <p class="subtitle">Daily simulation runs against each new commit on metadid:main.</p>
-            <div class="latest"><a href="latest/">→ Latest report</a> &middot; <a href="archive.csv">cumulative aggregated CSV</a></div>
+            <div class="latest"><a href="latest/">→ Latest report</a> &middot; <a href="archive.csv">cumulative aggregated CSV</a> &middot; <a href="scenario_settings.csv">scenario × model settings CSV</a></div>
             <h2>Archive</h2>
             <table>
               <thead><tr><th>Date</th><th>metadid commit</th><th>Report</th><th>Aggregated CSV</th></tr></thead>

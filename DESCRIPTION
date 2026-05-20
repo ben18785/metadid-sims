@@ -1,0 +1,36 @@
+Package: metadidsims
+Title: Simulation Validation Studies for the metadid Package
+Version: 0.0.0.9000
+Authors@R: person("Ben", "Lambert", email = "ben.c.lambert@gmail.com", role = c("aut", "cre"))
+Description: Internal repository of simulation-based validation studies
+    for the metadid R package. Not intended to be installed as a package;
+    this DESCRIPTION exists so that GitHub Actions
+    (r-lib/actions/setup-r-dependencies) can resolve and install every R
+    dependency of the targets pipeline and the Quarto validation report
+    from a single source of truth, eliminating drift between code and CI.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Additional_repositories: https://mc-stan.org/r-packages/
+Imports:
+    cmdstanr,
+    dplyr,
+    forcats,
+    ggplot2,
+    gridExtra,
+    instantiate,
+    kableExtra,
+    knitr,
+    MASS,
+    mvtnorm,
+    purrr,
+    quarto,
+    readr,
+    rlang,
+    rmarkdown,
+    scales,
+    stringr,
+    tarchetypes,
+    targets,
+    tibble,
+    tidyr,
+    tidyselect

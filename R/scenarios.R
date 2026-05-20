@@ -804,3 +804,125 @@ scenario_summary_table <- function(category) {
     )
   })
 }
+
+# ---------------------------------------------------------------------------
+# Long-format scenario × model settings table
+# ---------------------------------------------------------------------------
+
+# Which programmatic comparators each category runs (see _targets.R).
+# These mirror the matrix of tar_map_rep targets and must stay in sync.
+.COMPARATOR_RULES <- list(
+  A = c("naive", "robust"),
+  B = character(),
+  C = character(),
+  D = c("naive", "robust"),
+  E = c("naive", "robust"),
+  F = c("robust"),
+  G = character(),
+  H = character()
+)
+
+# Coerce one config value (which may be NULL, a formula, a data.frame, a
+# named list of priors, a vector, or a scalar) to a single string so it can
+# sit in one CSV cell.
+.flatten_value <- function(x) {
+  if (is.null(x))                   return(NA_character_)
+  if (inherits(x, "formula"))       return(paste(deparse(x), collapse = " "))
+  if (is.data.frame(x))             return(paste0("data.frame(", paste(names(x), collapse = ","), ")"))
+  if (is.list(x))                   return(paste(deparse(x), collapse = " "))
+  if (length(x) == 0)               return(NA_character_)
+  if (length(x) > 1)                return(paste(x, collapse = ";"))
+  as.character(x)
+}
+
+# Flatten a named list (e.g. cfg$dgp or cfg$fit) into a named list of
+# single-string values, prefixing each key. `defaults` is the corresponding
+# defaults list so the column set is stable across scenarios.
+.flatten_named_list <- function(values, prefix, defaults) {
+  keys <- union(names(defaults), names(values))
+  out  <- lapply(keys, function(k) .flatten_value(values[[k]]))
+  names(out) <- paste0(prefix, "_", keys)
+  out
+}
+
+# The fixed naive model config (mirrors fit_naive.R::run_naive_rep).
+.build_naive_fit <- function(base_fit) {
+  list(
+    fn                    = "meta_did_general",
+    normalise_by_baseline = base_fit$normalise_by_baseline,
+    robust_heterogeneity  = FALSE,
+    design_effects        = base_fit$design_effects,
+    correlated_effects    = FALSE,
+    hierarchical_rho      = base_fit$hierarchical_rho,
+    time_trend            = "fixed_zero",
+    baseline_imbalance    = "fixed_zero",
+    pp_likelihood         = default_fit$pp_likelihood,
+    covariates            = NULL,
+    provide_rho           = default_fit$provide_rho,
+    data_format           = "summary"
+  )
+}
+
+.make_settings_row <- function(scenario_id, cfg, fit_for_row, model_label) {
+  base <- list(
+    scenario_id = scenario_id,
+    category    = substr(scenario_id, 1L, 1L),
+    description = cfg$description,
+    model_label = model_label
+  )
+  dgp_flat <- .flatten_named_list(cfg$dgp, "dgp", default_dgp)
+  fit_full <- modifyList(default_fit, fit_for_row)
+  fit_flat <- .flatten_named_list(fit_full, "fit", default_fit)
+  tibble::as_tibble(c(base, dgp_flat, fit_flat))
+}
+
+#' Build a long-format table with one row per (scenario_id, model) actually run
+#'
+#' Mirrors the model-execution logic in `_targets.R`. Every scenario contributes
+#' one row per primary fit (the `compare` list, if present, expands into multiple
+#' rows), plus a "naive" row for A/D/E scenarios whose base `data_format` is not
+#' `"individual"`, plus a "robust" row for A/F/D/E scenarios whose base
+#' `correlated_effects` is not `TRUE`. G scenarios contribute only their primary
+#' fit (matching `run_g_rep`).
+#'
+#' Returned columns:
+#'   scenario_id, category, description, model_label,
+#'   dgp_*  — every key in `default_dgp` plus any scenario-specific keys,
+#'   fit_*  — every key in `default_fit` plus any scenario-specific keys
+#'           (e.g. `fit_priors` for G scenarios).
+build_scenario_settings_table <- function() {
+  rows <- list()
+  for (sid in names(SCENARIO_CONFIGS)) {
+    cfg         <- SCENARIO_CONFIGS[[sid]]
+    category    <- substr(sid, 1L, 1L)
+    comparators <- .COMPARATOR_RULES[[category]]
+    if (is.null(comparators)) comparators <- character()
+
+    # --- Primary fit(s) ---
+    if (!is.null(cfg$compare)) {
+      for (cmp in cfg$compare) {
+        merged_fit <- modifyList(cfg$fit, cmp)
+        label      <- if (!is.null(cmp$label)) cmp$label else "default"
+        rows[[length(rows) + 1L]] <- .make_settings_row(sid, cfg, merged_fit, label)
+      }
+    } else {
+      rows[[length(rows) + 1L]] <- .make_settings_row(sid, cfg, cfg$fit, "default")
+    }
+
+    # --- Naive comparator ---
+    if ("naive" %in% comparators &&
+        !isTRUE(cfg$fit$data_format == "individual")) {
+      rows[[length(rows) + 1L]] <- .make_settings_row(
+        sid, cfg, .build_naive_fit(cfg$fit), "naive"
+      )
+    }
+
+    # --- Robust comparator ---
+    if ("robust" %in% comparators &&
+        !isTRUE(cfg$fit$correlated_effects)) {
+      robust_fit <- modifyList(cfg$fit, list(robust_heterogeneity = TRUE))
+      rows[[length(rows) + 1L]] <- .make_settings_row(sid, cfg, robust_fit, "robust")
+    }
+  }
+  dplyr::bind_rows(rows)
+}

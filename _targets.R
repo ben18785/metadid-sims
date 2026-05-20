@@ -345,6 +345,22 @@ list(
     format = "file"
   ),
 
+  # ---- Long-format scenario × model settings table ----
+  # One row per (scenario_id, model_label) actually executed by the pipeline,
+  # with one column per DGP and fit configuration field. Used to cross-
+  # reference aggregated_results.csv against the exact config that produced
+  # each row.
+  tar_target(
+    scenario_settings_csv,
+    {
+      dir.create("output", showWarnings = FALSE)
+      tbl <- build_scenario_settings_table()
+      readr::write_csv(tbl, "output/scenario_settings.csv")
+      "output/scenario_settings.csv"
+    },
+    format = "file"
+  ),
+
   tar_target(
     archive_results,
     {
