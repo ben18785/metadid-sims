@@ -93,21 +93,49 @@ jobs:
           fi
 
   # ---------------------------------------------------------------------------
-  # simulate: one parallel matrix job per scenario category
+  # list_scenarios: extract every scenario ID from R/scenarios.R and emit
+  # them as a JSON array. The simulate matrix consumes this so adding a new
+  # scenario in the R source automatically gives it its own CI job.
   # ---------------------------------------------------------------------------
-  simulate:
-    name: "Category ${{ matrix.category }}"
+  list_scenarios:
+    name: List scenarios
     needs: check
     if: needs.check.outputs.run == 'true'
     runs-on: ubuntu-latest
-    # GitHub Actions hard-caps a single job at 6h on Linux runners. If a
-    # category overruns this we'd need to subdivide the matrix further
-    # (e.g. one job per scenario).
-    timeout-minutes: 350
+    outputs:
+      scenarios: ${{ steps.extract.outputs.scenarios }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: extract
+        run: |
+          set -euo pipefail
+          ids=$(grep -E '^  [A-H][0-9]+ = scenario\(' R/scenarios.R \
+                | sed -E 's/^  ([A-H][0-9]+) = .*/\1/')
+          if [ -z "$ids" ]; then
+            echo "::error::No scenario IDs found in R/scenarios.R"
+            exit 1
+          fi
+          json=$(printf '%s\n' $ids | jq -R . | jq -s -c .)
+          echo "Found $(printf '%s\n' $ids | wc -l) scenarios"
+          echo "scenarios=$json" >> "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------------
+  # simulate: one parallel matrix job per scenario. Pro tier has 40
+  # concurrent slots; the ~64 scenarios run in ~1.5 waves.
+  # ---------------------------------------------------------------------------
+  simulate:
+    name: "Scenario ${{ matrix.scenario }}"
+    needs: [check, list_scenarios]
+    if: needs.check.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    # No single scenario should approach this. The previous full-category
+    # timeout (350 min) was driven by the slowest category (~6h for A/F/G);
+    # individual scenarios in those categories run in ~20–50 min.
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
-        category: [A, B, C, D, E, F, G, H]
+        scenario: ${{ fromJson(needs.list_scenarios.outputs.scenarios) }}
     env:
       METADID_SHA: ${{ needs.check.outputs.metadid_sha }}
     steps:
@@ -158,20 +186,25 @@ jobs:
       - name: Install metadid from local checkout
         run: R CMD INSTALL ./metadid
 
-      - name: Run targets for category ${{ matrix.category }}
+      - name: Run targets for scenario ${{ matrix.scenario }}
         working-directory: metadid-sims
         run: |
+          # tarchetypes::tar_map_rep names per-scenario targets with the
+          # scenario_id as a suffix, e.g. A_rep_A1, A_rep_naive_A1,
+          # A_rep_A1_combine, A_rep_A1_<hash>. The regex `_<sid>(_|$)`
+          # matches every variant for one scenario without overshooting
+          # (e.g. `_A1` is anchored so it does NOT match `_A10`).
           Rscript -e '
             library(targets)
             tar_make(
-              names = tidyselect::starts_with("${{ matrix.category }}_")
+              names = tidyselect::matches("_${{ matrix.scenario }}(_|$)")
             )
           '
 
       - name: Upload _targets store slice
         uses: actions/upload-artifact@v4
         with:
-          name: targets-store-${{ matrix.category }}
+          name: targets-store-${{ matrix.scenario }}
           path: |
             metadid-sims/_targets/meta/
             metadid-sims/_targets/objects/
