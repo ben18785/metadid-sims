@@ -106,8 +106,8 @@ SCENARIO_CONFIGS <- list(
   ),
 
   A4 = scenario(
-    "Very large sample: DiD-only, 200 studies",
-    dgp = list(n_did = 200L)
+    "Very large sample: DiD-only, 100 studies",
+    dgp = list(n_did = 100L)
   ),
 
   A5 = scenario(
@@ -173,8 +173,8 @@ SCENARIO_CONFIGS <- list(
   # ---------------------------------------------------------------------------
 
   F1 = scenario(
-    "Large mixed, normalised, full model: 70 DiD + 70 RCT + 60 PP",
-    dgp = list(n_did = 70L, n_rct = 70L, n_pp = 60L)
+    "Large mixed, normalised, full model: 35 DiD + 35 RCT + 30 PP",
+    dgp = list(n_did = 35L, n_rct = 35L, n_pp = 30L)
   ),
 
   F2 = scenario(
@@ -197,8 +197,8 @@ SCENARIO_CONFIGS <- list(
   ),
 
   F4 = scenario(
-    "Large DiD + RCT only: 100 DiD + 100 RCT",
-    dgp = list(n_did = 100L, n_rct = 100L)
+    "Large DiD + RCT only: 50 DiD + 50 RCT",
+    dgp = list(n_did = 50L, n_rct = 50L)
   ),
 
   F5 = scenario(
@@ -217,8 +217,8 @@ SCENARIO_CONFIGS <- list(
   ),
 
   F7 = scenario(
-    "Large mixed, design effects: 70 DiD + 70 RCT + 60 PP with offsets",
-    dgp = list(n_did = 70L, n_rct = 70L, n_pp = 60L),
+    "Large mixed, design effects: 35 DiD + 35 RCT + 30 PP with offsets",
+    dgp = list(n_did = 35L, n_rct = 35L, n_pp = 30L),
     fit = list(design_effects = TRUE),
     true = list(delta_rct = 0.10, delta_pp = -0.08)
   ),
@@ -677,13 +677,13 @@ SCENARIO_CONFIGS <- list(
   ),
 
   G8 = scenario(
-    "Jensen's test: baseline_sd = 0.10, amplified variation (200 DiD)",
-    dgp = list(n_did = 200L, baseline_sd = 0.10)
+    "Jensen's test: baseline_sd = 0.10, amplified variation (100 DiD)",
+    dgp = list(n_did = 100L, baseline_sd = 0.10)
   ),
 
   G9 = scenario(
-    "Jensen's test: n_control = 5000, high within-study precision (200 DiD)",
-    dgp = list(n_did = 200L, n_control = 5000L)
+    "Jensen's test: n_control = 5000, high within-study precision (100 DiD)",
+    dgp = list(n_did = 100L, n_control = 5000L)
   ),
 
   # ---------------------------------------------------------------------------

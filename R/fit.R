@@ -5,10 +5,22 @@
 
 library(metadid)
 
-# MCMC configuration (shared across all fits)
+# MCMC configuration (shared across all fits).
+#
+# chains = 2, parallel_chains = 2 means each fit runs its 2 chains
+# concurrently on 2 cores in time T (single-chain wall time). The targets
+# controller in _targets.R sets workers = 2, so two fits run side by side
+# on the 4-core GitHub Actions runner — 2 fits × 2 chains = 4 chains in
+# flight, completing a pair of fits in T versus the previous 2T for two
+# sequential 4-chain fits. Net: roughly 2x throughput per scenario.
+#
+# The cost is statistical: 2 chains is the minimum for Rhat-style
+# convergence diagnostics, and gives weaker signal on between-chain
+# disagreement than the conventional 4 chains. If divergences or Rhat
+# become a problem, bump chains back up.
 MCMC_OPTS <- list(
-  chains          = 4L,
-  parallel_chains = 4L,
+  chains          = 2L,
+  parallel_chains = 2L,
   iter_warmup     = 1000L,
   iter_sampling   = 1000L,
   refresh         = 0

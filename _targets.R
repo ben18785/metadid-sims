@@ -20,6 +20,23 @@ library(targets)
 library(tarchetypes)
 
 # ---------------------------------------------------------------------------
+# Parallel execution
+# ---------------------------------------------------------------------------
+#
+# Run two targets concurrently within each pipeline invocation. Combined
+# with parallel_chains = 2 in R/fit.R, this saturates the 4-core GitHub
+# Actions runner: 2 concurrent fits × 2 chains per fit = 4 chains in
+# flight. Reduces wall time within a scenario when there are many
+# replications/fit-variants (e.g. A4 = 3 fit-variants × 25 reps = 75
+# sequential fits previously).
+#
+# crew_controller_local launches local R subprocesses; no SSH/cluster
+# setup required.
+tar_option_set(
+  controller = crew::crew_controller_local(workers = 2L)
+)
+
+# ---------------------------------------------------------------------------
 # Global configuration
 # ---------------------------------------------------------------------------
 

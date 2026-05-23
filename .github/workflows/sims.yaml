@@ -128,11 +128,12 @@ jobs:
     needs: [check, list_scenarios]
     if: needs.check.outputs.run == 'true'
     runs-on: ubuntu-latest
-    # GitHub Actions caps single jobs at 6h on Linux runners. Long F/G
-    # scenarios have been observed at ~1.5h, so 240 min gives ~2.5x
-    # headroom while staying clear of the hard cap. Jobs that hit
-    # timeout-minutes are reported as "The operation was canceled."
-    timeout-minutes: 240
+    # GitHub Actions caps single jobs at 6h on Linux runners; this sets
+    # the explicit timeout at the hard cap. Some scenarios have started
+    # exceeding the previous 4h ceiling, so we take the full budget the
+    # runner allows. Jobs that hit timeout-minutes are reported as
+    # "The operation was canceled."
+    timeout-minutes: 360
     strategy:
       fail-fast: false
       matrix:
@@ -226,9 +227,11 @@ jobs:
     # without losing the run.
     if: ${{ always() && needs.check.outputs.run == 'true' }}
     runs-on: ubuntu-latest
-    # Longer than before because the report job may need to rebuild any
-    # missing per-scenario slices on top of the merge/render work.
-    timeout-minutes: 240
+    # Match the simulate-job cap (6h, GitHub's hard limit). The report
+    # job may need to rebuild any per-scenario slices that didn't make
+    # it into the uploaded artifacts on top of the merge/render work,
+    # so it gets the same budget as the simulate jobs.
+    timeout-minutes: 360
     env:
       METADID_SHA: ${{ needs.check.outputs.metadid_sha }}
     steps:
