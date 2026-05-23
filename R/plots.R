@@ -211,7 +211,7 @@ results_table <- function(agg_results, lookup, category, caption = NULL) {
   fmt_assumptions <- function(fit) {
     `%||%` <- rlang::`%||%`
     parts <- c(
-      if (isTRUE(fit$normalise_by_baseline))  "normalised"       else "unnormalised",
+      if (isTRUE(fit$normalise))  "normalised"       else "unnormalised",
       if (isTRUE(fit$robust_heterogeneity))   "robust heterogeneity" else "normal heterogeneity",
       if (isTRUE(fit$design_effects))         "design effects"   else NULL,
       if (isTRUE(fit$correlated_effects))     "correlated effects" else NULL,
@@ -287,4 +287,37 @@ plot_convergence <- function(agg_results) {
     ) +
     theme_minimal() +
     theme(axis.text.x = element_text(angle = 45, hjust = 1))
+}
+
+#' Sampler-divergence diagnostics by scenario
+#'
+#' Two stacked panels: (top) mean number of divergent transitions per fit,
+#' (bottom) percentage of reps with any divergent transitions. Both are
+#' useful — the mean indicates magnitude when divergences do occur, the
+#' percentage indicates how widespread the problem is across replicate fits.
+#'
+#' @param agg_results Aggregated results from aggregate_scenario()
+plot_divergences <- function(agg_results) {
+  df <- agg_results |>
+    filter(parameter == "treatment_effect_mean") |>
+    select(scenario_id, model_label,
+           mean_n_divergent, pct_reps_with_divergence,
+           pct_reps_many_divergence) |>
+    distinct()
+
+  p_mean <- ggplot(df, aes(x = scenario_id, y = mean_n_divergent, fill = model_label)) +
+    geom_col(position = position_dodge(width = 0.7), width = 0.6) +
+    labs(x = NULL, y = "Mean divergent transitions per fit", fill = "Model") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+  p_pct <- ggplot(df, aes(x = scenario_id, y = pct_reps_with_divergence, fill = model_label)) +
+    geom_col(position = position_dodge(width = 0.7), width = 0.6) +
+    scale_y_continuous(labels = scales::percent_format()) +
+    labs(x = "Scenario", y = "% reps with > 0 divergences", fill = "Model") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+  gridExtra::grid.arrange(p_mean, p_pct, nrow = 2,
+                           top = "Sampler divergences by scenario")
 }

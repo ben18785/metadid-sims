@@ -31,7 +31,8 @@ fit_scenario <- function(sim_result, fit_config) {
   args <- c(
     data,  # unpacks to summary_data = ... and/or individual_data = ...
     list(
-      normalise_by_baseline = fit_config$normalise_by_baseline,
+      normalise             = fit_config$normalise,
+      baseline_latent_arm   = fit_config$baseline_latent_arm %||% "treatment",
       robust_heterogeneity  = fit_config$robust_heterogeneity,
       design_effects        = fit_config$design_effects,
       hierarchical_rho      = fit_config$hierarchical_rho
@@ -123,12 +124,33 @@ extract_posteriors <- function(fit) {
     min_ess  <- NA_real_
   }
 
+  # Sampler diagnostics aggregated across chains for the whole fit.
+  # diagnostic_summary() returns per-chain vectors; we sum / max as
+  # appropriate. Suppressing the warning chatter — the same information
+  # comes back in the values.
+  if (fit$method == "sample") {
+    diag <- suppressWarnings(fit$fit$diagnostic_summary(quiet = TRUE))
+    n_divergent      <- sum(diag$num_divergent      %||% 0L)
+    n_max_treedepth  <- sum(diag$num_max_treedepth  %||% 0L)
+    min_ebfmi        <- min(diag$ebfmi              %||% NA_real_, na.rm = TRUE)
+  } else {
+    n_divergent     <- NA_integer_
+    n_max_treedepth <- NA_integer_
+    min_ebfmi       <- NA_real_
+  }
+
   s |>
     dplyr::mutate(
-      max_rhat = max_rhat,
-      min_ess_bulk = min_ess
+      max_rhat         = max_rhat,
+      min_ess_bulk     = min_ess,
+      n_divergent      = n_divergent,
+      n_max_treedepth  = n_max_treedepth,
+      min_ebfmi        = min_ebfmi
     )
 }
+
+# Local %||% fallback in case rlang isn't attached at use time.
+`%||%` <- function(x, y) if (is.null(x)) y else x
 
 # ===========================================================================
 # Run one replication (simulate + fit + assess)

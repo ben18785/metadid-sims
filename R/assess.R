@@ -19,7 +19,7 @@ library(dplyr)
 #' @return Tibble with one row per assessed parameter
 assess_one <- function(posteriors, true_params, fit_config) {
 
-  normalised <- fit_config$normalise_by_baseline
+  normalised <- fit_config$normalise
   suffix <- if (normalised) "_normalised" else "_raw"
 
   # Map from posterior parameter names to true_params column names
@@ -79,12 +79,21 @@ assess_one <- function(posteriors, true_params, fit_config) {
       bias            = post_row$mean - true_val,
       ci_width        = post_row$hi - post_row$lo,
       max_rhat        = post_row$max_rhat,
-      min_ess_bulk    = post_row$min_ess_bulk
+      min_ess_bulk    = post_row$min_ess_bulk,
+      # Per-fit sampler diagnostics. Same value for every row of a given
+      # fit (one fit = one rep); aggregation below pulls a single value
+      # per rep before computing rep-level stats.
+      n_divergent     = post_row$n_divergent     %||% NA_integer_,
+      n_max_treedepth = post_row$n_max_treedepth %||% NA_integer_,
+      min_ebfmi       = post_row$min_ebfmi       %||% NA_real_
     )
   })
 
   results
 }
+
+# Local %||% fallback so this file is independent of rlang attach state.
+`%||%` <- function(x, y) if (is.null(x)) y else x
 
 # ===========================================================================
 # Aggregation across replications
@@ -112,6 +121,15 @@ aggregate_scenario <- function(results) {
       min_ess_worst      = min(min_ess_bulk, na.rm = TRUE),
       # Fraction with Rhat > 1.05 (problematic fits)
       pct_rhat_bad       = mean(max_rhat > 1.05, na.rm = TRUE),
+      # Sampler diagnostics (n_divergent etc. are constant within a rep
+      # so the summary across rows-of-this-rep equals the value itself;
+      # aggregating across reps gives a per-scenario picture).
+      mean_n_divergent           = mean(n_divergent, na.rm = TRUE),
+      max_n_divergent            = max(n_divergent,  na.rm = TRUE),
+      pct_reps_with_divergence   = mean(n_divergent > 0,  na.rm = TRUE),
+      pct_reps_many_divergence   = mean(n_divergent > 10, na.rm = TRUE),
+      mean_n_max_treedepth       = mean(n_max_treedepth, na.rm = TRUE),
+      min_ebfmi_worst            = min(min_ebfmi, na.rm = TRUE),
       .groups = "drop"
     )
 }

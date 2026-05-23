@@ -250,6 +250,19 @@ results_table(all_agg, scenario_lookup_tbl, "G")
 plot_convergence(all_agg)
 ```
 
+### Sampler divergences
+
+The HMC sampler reports a divergent transition when its leapfrog
+integrator overshoots a sharp curve in the posterior. A few divergences
+in a long run are usually tolerable; many divergences flag a posterior
+geometry the sampler can't navigate (typically funnels, hard
+constraints near the posterior bulk, or wide-uniform-prior pathologies).
+
+```{r divergences}
+#| fig-height: 8
+plot_divergences(all_agg)
+```
+
 ## Full Results Table
 
 ```{r full-table}

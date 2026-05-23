@@ -60,7 +60,7 @@ simulate_from_metadid <- function(config) {
 
   data <- assemble_data(sim, dgp, fit)
 
-  true_params <- build_true_params(dgp, config$true, fit$normalise_by_baseline)
+  true_params <- build_true_params(dgp, config$true, fit$normalise)
 
   list(data = data, true_params = true_params)
 }
@@ -318,7 +318,7 @@ simulate_with_outliers <- function(config) {
   )
 
   summary_df <- simulate_did_summary_from_params(study_params, dgp)
-  true_params <- build_true_params(dgp, config$true, config$fit$normalise_by_baseline)
+  true_params <- build_true_params(dgp, config$true, config$fit$normalise)
 
   list(data = list(summary_data = summary_df), true_params = true_params)
 }
@@ -338,7 +338,7 @@ simulate_t_effects <- function(config) {
   )
 
   summary_df <- simulate_did_summary_from_params(study_params, dgp)
-  true_params <- build_true_params(dgp, config$true, config$fit$normalise_by_baseline)
+  true_params <- build_true_params(dgp, config$true, config$fit$normalise)
 
   list(data = list(summary_data = summary_df), true_params = true_params)
 }
@@ -362,7 +362,7 @@ simulate_t_likelihood <- function(config) {
     }
   )
 
-  true_params <- build_true_params(dgp, config$true, config$fit$normalise_by_baseline)
+  true_params <- build_true_params(dgp, config$true, config$fit$normalise)
   list(data = list(summary_data = summary_df), true_params = true_params)
 }
 
@@ -381,7 +381,7 @@ simulate_t_trends <- function(config) {
   )
 
   summary_df <- simulate_did_summary_from_params(study_params, dgp)
-  true_params <- build_true_params(dgp, config$true, config$fit$normalise_by_baseline)
+  true_params <- build_true_params(dgp, config$true, config$fit$normalise)
 
   list(data = list(summary_data = summary_df), true_params = true_params)
 }
@@ -424,7 +424,7 @@ simulate_design_outliers <- function(config) {
   })
 
   summary_df <- bind_rows(did_summary, pp_summary)
-  true_params <- build_true_params(dgp, config$true, config$fit$normalise_by_baseline)
+  true_params <- build_true_params(dgp, config$true, config$fit$normalise)
 
   list(data = list(summary_data = summary_df), true_params = true_params)
 }
@@ -480,7 +480,7 @@ simulate_design_offsets <- function(config) {
   )
 
   summary_df <- bind_rows(did_summary, rct_summary, pp_summary)
-  true_params <- build_true_params(dgp, config$true, config$fit$normalise_by_baseline)
+  true_params <- build_true_params(dgp, config$true, config$fit$normalise)
 
   list(data = list(summary_data = summary_df), true_params = true_params)
 }
@@ -515,7 +515,7 @@ simulate_divergent_trends <- function(config) {
   )
 
   summary_df <- bind_rows(did_summary, pp_summary)
-  true_params <- build_true_params(dgp, config$true, config$fit$normalise_by_baseline)
+  true_params <- build_true_params(dgp, config$true, config$fit$normalise)
 
   list(data = list(summary_data = summary_df), true_params = true_params)
 }
@@ -541,7 +541,7 @@ simulate_hetero_variance <- function(config) {
     }
   )
 
-  true_params <- build_true_params(dgp, config$true, config$fit$normalise_by_baseline)
+  true_params <- build_true_params(dgp, config$true, config$fit$normalise)
   list(data = list(summary_data = summary_df), true_params = true_params)
 }
 
@@ -566,7 +566,7 @@ simulate_varying_rho <- function(config) {
     }
   )
 
-  true_params <- build_true_params(dgp, config$true, config$fit$normalise_by_baseline)
+  true_params <- build_true_params(dgp, config$true, config$fit$normalise)
   list(data = list(summary_data = summary_df), true_params = true_params)
 }
 
@@ -595,7 +595,7 @@ simulate_size_effect_corr <- function(config) {
     }
   )
 
-  true_params <- build_true_params(dgp, config$true, config$fit$normalise_by_baseline)
+  true_params <- build_true_params(dgp, config$true, config$fit$normalise)
   list(data = list(summary_data = summary_df), true_params = true_params)
 }
 
@@ -640,7 +640,7 @@ simulate_rct_imbalance <- function(config) {
   )
 
   summary_df <- bind_rows(did_summary, rct_summary)
-  true_params <- build_true_params(dgp, config$true, config$fit$normalise_by_baseline)
+  true_params <- build_true_params(dgp, config$true, config$fit$normalise)
 
   list(data = list(summary_data = summary_df), true_params = true_params)
 }
@@ -720,7 +720,7 @@ simulate_did_rct_imbalance <- function(config) {
   )
 
   summary_df  <- bind_rows(did_summary, rct_summary)
-  true_params <- build_true_params(dgp, config$true, config$fit$normalise_by_baseline)
+  true_params <- build_true_params(dgp, config$true, config$fit$normalise)
 
   list(data = list(summary_data = summary_df), true_params = true_params)
 }
@@ -772,7 +772,7 @@ simulate_lognormal_trends <- function(config) {
 
   list(
     data        = list(summary_data = bind_rows(did_summary, pp_summary)),
-    true_params = build_true_params(dgp, config$true, config$fit$normalise_by_baseline)
+    true_params = build_true_params(dgp, config$true, config$fit$normalise)
   )
 }
 
@@ -817,7 +817,7 @@ simulate_bimodal_trends <- function(config) {
 
   list(
     data        = list(summary_data = bind_rows(did_summary, pp_summary)),
-    true_params = build_true_params(dgp, config$true, config$fit$normalise_by_baseline)
+    true_params = build_true_params(dgp, config$true, config$fit$normalise)
   )
 }
 
@@ -875,7 +875,7 @@ simulate_trend_size_corr <- function(config) {
 
   list(
     data        = list(summary_data = bind_rows(did_summary, pp_summary)),
-    true_params = build_true_params(dgp, config$true, config$fit$normalise_by_baseline)
+    true_params = build_true_params(dgp, config$true, config$fit$normalise)
   )
 }
 
@@ -902,6 +902,6 @@ simulate_extreme_rho <- function(config) {
     }
   )
 
-  true_params <- build_true_params(dgp, config$true, config$fit$normalise_by_baseline)
+  true_params <- build_true_params(dgp, config$true, config$fit$normalise)
   list(data = list(summary_data = summary_df), true_params = true_params)
 }

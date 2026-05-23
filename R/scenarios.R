@@ -15,7 +15,11 @@
 #
 #   fit:  Model fitting options
 #     fn              "meta_did" or "meta_did_general"
-#     normalise_by_baseline
+#     normalise              logical — TRUE expresses effects as fractions of
+#                            the treatment-pre baseline, FALSE pools on the
+#                            absolute (user-units) scale
+#     baseline_latent_arm    "treatment" (default) or "control" — which arm's
+#                            baseline is the per-study latent in modelled mode
 #     robust_heterogeneity, design_effects, correlated_effects
 #     hierarchical_rho
 #     time_trend, baseline_imbalance, pp_likelihood (for meta_did_general)
@@ -55,7 +59,8 @@ default_dgp <- list(
 
 default_fit <- list(
   fn                    = "meta_did",
-  normalise_by_baseline = TRUE,
+  normalise             = TRUE,
+  baseline_latent_arm   = "treatment",
   robust_heterogeneity  = FALSE,
   design_effects        = FALSE,
   correlated_effects    = FALSE,
@@ -133,13 +138,13 @@ SCENARIO_CONFIGS <- list(
 
   A9 = scenario(
     "Unnormalised DiD-only, 20 studies, raw scale",
-    fit = list(normalise_by_baseline = FALSE)
+    fit = list(normalise = FALSE)
   ),
 
   A10 = scenario(
     "Unnormalised mixed: 10 DiD + 10 RCT + 10 PP, raw scale",
     dgp = list(n_did = 10L, n_rct = 10L, n_pp = 10L),
-    fit = list(normalise_by_baseline = FALSE)
+    fit = list(normalise = FALSE)
   ),
 
   A11 = scenario(
@@ -188,7 +193,7 @@ SCENARIO_CONFIGS <- list(
   F3 = scenario(
     "Large mixed, unnormalised: 70 DiD + 70 RCT + 60 PP",
     dgp = list(n_did = 70L, n_rct = 70L, n_pp = 60L),
-    fit = list(normalise_by_baseline = FALSE)
+    fit = list(normalise = FALSE)
   ),
 
   F4 = scenario(
@@ -306,6 +311,24 @@ SCENARIO_CONFIGS <- list(
     compare = list(
       list(label = "full",  fn = "meta_did"),
       list(label = "naive", fn = "meta_did_general", baseline_imbalance = "fixed_zero")
+    )
+  ),
+
+  # B7: paired comparison of the two modelled-mode parameterisations.
+  # The two options of baseline_latent_arm encode the same statistical model
+  # — they differ only in which arm's pre-baseline is the per-study latent
+  # with the wide uniform prior, and which is derived via the hierarchical
+  # baseline-imbalance parameter. In well-identified problems (decent sample
+  # sizes, both arms observed) the two should give numerically equivalent
+  # posteriors on every population-level parameter. This scenario fits the
+  # same simulated data under both choices and lets the validation report
+  # show the agreement (or any discrepancy under stress regimes).
+  B7 = scenario(
+    "Baseline-latent-arm parameterisation: treatment vs control, 30 DiD",
+    dgp = list(n_did = 30L),
+    compare = list(
+      list(label = "treatment_latent", baseline_latent_arm = "treatment"),
+      list(label = "control_latent",   baseline_latent_arm = "control")
     )
   ),
 
@@ -587,7 +610,7 @@ SCENARIO_CONFIGS <- list(
     "Prior sensitivity: effect/trend prior sd = 1 (unnormalised, 20 DiD)",
     dgp = list(),
     fit = list(
-      normalise_by_baseline = FALSE,
+      normalise = FALSE,
       priors = metadid::set_priors(
         treatment_effect_mean = metadid::normal(0, 1),
         time_trend_mean       = metadid::normal(0, 1)
@@ -599,7 +622,7 @@ SCENARIO_CONFIGS <- list(
     "Prior sensitivity: effect/trend prior sd = 5 (unnormalised, 20 DiD)",
     dgp = list(),
     fit = list(
-      normalise_by_baseline = FALSE,
+      normalise = FALSE,
       priors = metadid::set_priors(
         treatment_effect_mean = metadid::normal(0, 5),
         time_trend_mean       = metadid::normal(0, 5)
@@ -611,7 +634,7 @@ SCENARIO_CONFIGS <- list(
     "Prior sensitivity: effect/trend prior sd = 10 (default, unnormalised, 20 DiD)",
     dgp = list(),
     fit = list(
-      normalise_by_baseline = FALSE,
+      normalise = FALSE,
       priors = metadid::set_priors(
         treatment_effect_mean = metadid::normal(0, 10),
         time_trend_mean       = metadid::normal(0, 10)
@@ -623,7 +646,7 @@ SCENARIO_CONFIGS <- list(
     "Prior sensitivity: effect/trend prior sd = 50 (unnormalised, 20 DiD)",
     dgp = list(),
     fit = list(
-      normalise_by_baseline = FALSE,
+      normalise = FALSE,
       priors = metadid::set_priors(
         treatment_effect_mean = metadid::normal(0, 50),
         time_trend_mean       = metadid::normal(0, 50)
@@ -635,7 +658,7 @@ SCENARIO_CONFIGS <- list(
     "Prior sensitivity: effect/trend prior sd = 100 (unnormalised, 20 DiD)",
     dgp = list(),
     fit = list(
-      normalise_by_baseline = FALSE,
+      normalise = FALSE,
       priors = metadid::set_priors(
         treatment_effect_mean = metadid::normal(0, 100),
         time_trend_mean       = metadid::normal(0, 100)
@@ -849,7 +872,8 @@ scenario_summary_table <- function(category) {
 .build_naive_fit <- function(base_fit) {
   list(
     fn                    = "meta_did_general",
-    normalise_by_baseline = base_fit$normalise_by_baseline,
+    normalise             = base_fit$normalise,
+    baseline_latent_arm   = base_fit$baseline_latent_arm %||% "treatment",
     robust_heterogeneity  = FALSE,
     design_effects        = base_fit$design_effects,
     correlated_effects    = FALSE,
