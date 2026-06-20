@@ -49,7 +49,7 @@ cat("\n=== metadid-sims smoke test ===\n\n")
 # ---------------------------------------------------------------------------
 
 cat("run_one_rep (standard scenarios):\n")
-for (sid in c("A1", "B1", "C1", "D1", "E1", "F1", "H1", "H2", "H3", "H4")) {
+for (sid in c("A1", "B1", "C1", "D1", "E1", "F1", "H1", "H2", "H3", "H4", "I1", "I8")) {
   cfg <- SCENARIO_CONFIGS[[sid]]
   run_test(sid, run_one_rep(sid, cfg, rep_seed = 1L))
 }

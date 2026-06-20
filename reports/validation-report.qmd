@@ -250,6 +250,8 @@ Category I tests the multiplicative-covariate feature on the metadid `multiplica
 
 Every I scenario pairs a modelled-mode fit (`normalise = TRUE`) with a raw-scale fit (`normalise = FALSE`) via the `compare` block so we can read the multiplier-recovery signal on both scales. I5 and I6 additionally pair with-multiplier vs without-multiplier fits to quantify the misspecification cost of omitting the feature when truth has it (I5) and the false-positive cost of including it spuriously when truth doesn't (I6). All scenarios use a bespoke simulator (`simulate_multiplicative_levels`) that draws per-study true effects from `θ_i ~ N(m_{level(i)} · (μ_θ + X_cov_i · β_cov), σ_θ²)`.
 
+I8 and I9 exercise the two-covariate product extension (`multiplicative_covariate = ~ level + level2`): each study's overall factor is the product of two independently estimated per-covariate factors, labelled `effect_multiplier[<column>:<level>]` in the posterior. I8 crosses two binary covariates — one attenuating (0.6), one amplifying (1.4), so the amplifying direction is covered too — and I9 crosses a binary attenuator with a three-level covariate (0.7, 0.4), testing simultaneous recovery of three factors from a fully crossed design. The key diagnostics are per-factor coverage and the absence of leakage between the two factors (each multiplier should recover its own truth, not a blend of the product).
+
 ```{r i-scenarios}
 scenario_summary_table("I") |>
   kable(caption = "Category I: scenario definitions")
