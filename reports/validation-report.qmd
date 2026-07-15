@@ -244,6 +244,28 @@ plot_diagnostics(all_rep, all_agg, scenario_lookup_tbl, "G")
 results_table(all_agg, scenario_lookup_tbl, "G")
 ```
 
+## I. Multiplicative Covariate Scenarios
+
+Category I tests the multiplicative-covariate feature on the metadid `multiplicative-covars` branch: an estimated per-level factor (`effect_multiplier[<level>]`, with the reference level fixed at 1) applied to the population-mean linear predictor `treatment_effect_mean + X_cov · beta_cov`. Per-study heterogeneity is centred on the multiplied mean. The feature is useful when some study settings represent an attenuated or amplified version of the underlying effect (e.g. experimental vs real-world conditions, drug formulation, study source).
+
+Every I scenario pairs a modelled-mode fit (`normalise = TRUE`) with a raw-scale fit (`normalise = FALSE`) via the `compare` block so we can read the multiplier-recovery signal on both scales. I5 and I6 additionally pair with-multiplier vs without-multiplier fits to quantify the misspecification cost of omitting the feature when truth has it (I5) and the false-positive cost of including it spuriously when truth doesn't (I6). All scenarios use a bespoke simulator (`simulate_multiplicative_levels`) that draws per-study true effects from `θ_i ~ N(m_{level(i)} · (μ_θ + X_cov_i · β_cov), σ_θ²)`.
+
+```{r i-scenarios}
+scenario_summary_table("I") |>
+  kable(caption = "Category I: scenario definitions")
+```
+
+```{r i-diagnostics}
+#| fig-height: 7
+#| column: screen
+#| out-width: "100%"
+plot_diagnostics(all_rep, all_agg, scenario_lookup_tbl, "I")
+```
+
+```{r i-table}
+results_table(all_agg, scenario_lookup_tbl, "I")
+```
+
 ## Convergence Diagnostics
 
 ```{r convergence}

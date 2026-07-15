@@ -109,8 +109,8 @@ jobs:
       - id: extract
         run: |
           set -euo pipefail
-          ids=$(grep -E '^  [A-H][0-9]+ = scenario\(' R/scenarios.R \
-                | sed -E 's/^  ([A-H][0-9]+) = .*/\1/')
+          ids=$(grep -E '^  [A-I][0-9]+ = scenario\(' R/scenarios.R \
+                | sed -E 's/^  ([A-I][0-9]+) = .*/\1/')
           if [ -z "$ids" ]; then
             echo "::error::No scenario IDs found in R/scenarios.R"
             exit 1
@@ -333,6 +333,7 @@ jobs:
               "scenario_lookup_tbl",
               "diag_plot_A", "diag_plot_B", "diag_plot_C", "diag_plot_D",
               "diag_plot_E", "diag_plot_F", "diag_plot_G", "diag_plot_H",
+              "diag_plot_I",
               "all_agg", "all_rep",
               "export_agg_csv", "export_rep_rds", "archive_results",
               "scenario_settings_csv",

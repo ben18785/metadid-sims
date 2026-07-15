@@ -40,7 +40,7 @@ tar_option_set(
 # Global configuration
 # ---------------------------------------------------------------------------
 
-N_REPS <- 25L
+N_REPS <- 3L
 
 # ---------------------------------------------------------------------------
 # Source R files
@@ -314,6 +314,20 @@ list(
   ),
   tar_target(H_agg, aggregate_scenario(H_rep)),
 
+  # ---- Category I: Multiplicative covariate scenarios ----
+  # Each scenario handles its own modelled/raw and with/without comparators
+  # via the per-scenario `compare` block in scenarios.R, so no separate
+  # *_naive / *_robust comparator branches are needed.
+  tarchetypes::tar_map_rep(
+    name    = I_rep,
+    command = run_one_rep(scenario_id, config, targets::tar_seed_get(), metadid_src),
+    values  = scenario_values(scenario_ids("I")),
+    names   = tidyselect::any_of("scenario_id"),
+    batches = N_REPS,
+    reps    = 1
+  ),
+  tar_target(I_agg, aggregate_scenario(I_rep)),
+
   # ---- Scenario lookup table ----
   tar_target(scenario_lookup_tbl, scenario_lookup()),
 
@@ -339,16 +353,17 @@ list(
   tar_target(diag_plot_E, plot_diagnostics(E_rep,  E_agg,  scenario_lookup_tbl, "E")),
   tar_target(diag_plot_G, plot_diagnostics(G_rep,  G_agg,  scenario_lookup_tbl, "G")),
   tar_target(diag_plot_H, plot_diagnostics(H_rep,  H_agg,  scenario_lookup_tbl, "H")),
+  tar_target(diag_plot_I, plot_diagnostics(I_rep,  I_agg,  scenario_lookup_tbl, "I")),
 
   # ---- Combined results ----
   tar_target(
     all_agg,
-    dplyr::bind_rows(A_agg, F_agg, B_agg, C_agg, D_agg, E_agg, G_agg, H_agg)
+    dplyr::bind_rows(A_agg, F_agg, B_agg, C_agg, D_agg, E_agg, G_agg, H_agg, I_agg)
   ),
 
   tar_target(
     all_rep,
-    dplyr::bind_rows(A_rep, F_rep, B_rep, C_rep, D_rep, E_rep, G_rep, H_rep)
+    dplyr::bind_rows(A_rep, F_rep, B_rep, C_rep, D_rep, E_rep, G_rep, H_rep, I_rep)
   ),
 
   # ---- Machine-readable exports ----

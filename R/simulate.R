@@ -14,6 +14,11 @@ library(tibble)
 library(dplyr)
 library(metadid)
 
+# Local %||% fallback so simulate.R is independent of rlang attach state.
+# (Native %||% is available in base R >= 4.4 but we keep the fallback for
+# older R versions and to match the pattern in fit.R / assess.R.)
+`%||%` <- function(x, y) if (is.null(x)) y else x
+
 # ===========================================================================
 # Main dispatcher
 # ===========================================================================
@@ -904,4 +909,264 @@ simulate_extreme_rho <- function(config) {
 
   true_params <- build_true_params(dgp, config$true, config$fit$normalise)
   list(data = list(summary_data = summary_df), true_params = true_params)
+}
+
+# ===========================================================================
+# Bespoke DGPs: Multiplicative covariate (Category I)
+# ===========================================================================
+
+# Generate raw bivariate observations (pre, post) for one study × one arm.
+.gen_arm_observations <- function(n, mu_pre, mu_post, within_sd, rho) {
+  Sigma <- within_sd^2 * matrix(c(1, rho, rho, 1), 2, 2)
+  MASS::mvrnorm(n, c(mu_pre, mu_post), Sigma)
+}
+
+# Long-form rows for one study, given pre-computed observation matrices.
+# Used by the individual-level path of simulate_multiplicative_levels.
+.long_rows_one_study <- function(study_id, design, ctrl_obs, trt_obs) {
+  n_c <- nrow(ctrl_obs %||% matrix(0, 0, 2))
+  n_t <- nrow(trt_obs)
+
+  ctrl_long <- if (n_c > 0) {
+    tibble(
+      study_id   = study_id,
+      subject_id = paste0(study_id, "_c", rep(seq_len(n_c), times = 2)),
+      design     = design,
+      group      = "control",
+      time       = rep(c("pre", "post"), each = n_c),
+      value      = c(ctrl_obs[, 1], ctrl_obs[, 2])
+    )
+  } else tibble()
+
+  trt_long <- tibble(
+    study_id   = study_id,
+    subject_id = paste0(study_id, "_t", rep(seq_len(n_t), times = 2)),
+    design     = design,
+    group      = "treatment",
+    time       = rep(c("pre", "post"), each = n_t),
+    value      = c(trt_obs[, 1], trt_obs[, 2])
+  )
+
+  bind_rows(ctrl_long, trt_long)
+}
+
+# Simulator for the I-category multiplicative-covariate scenarios.
+#
+# Per-study true effect θ_i is drawn from
+#   N(m_{level(i)} · (true_effect + X_cov_i · beta_cov), sigma_effect²)
+# where m_k is the per-level multiplier (m_1 = 1 by convention; reference
+# level).
+#
+# Required DGP fields:
+#   level_assignments — integer vector of length n_did + n_rct + n_pp,
+#                       with values in 1:length(level_multipliers).
+#                       Ordering matches design ordering (DiD, then RCT,
+#                       then PP), matching the convention used elsewhere
+#                       in this file.
+#   level_multipliers — numeric vector of length K. The first entry is
+#                       the reference level and MUST equal 1.
+# Optional DGP fields:
+#   level_names       — character vector of length K, used for the names
+#                       of the effect_multiplier_<name> truth columns and
+#                       the level column emitted in the data. Defaults to
+#                       letters[1:K] so e.g. "a" is the reference.
+#   covariates / beta_cov — standard additive covariate fields (passed
+#                       through as in simulate_meta_did).
+#
+# Output shape mirrors the other bespoke simulators: list(data, true_params).
+# data contains either summary_data or individual_data depending on
+# config$fit$data_format. Both carry a `level` column that is constant within
+# each study; if covariates are present, the covariate columns are carried
+# through too.
+#
+# Used by: I1 (binary, balanced), I2 (three-level), I3 (multiplicative +
+# additive), I4 (mixed designs), I5 (omit-multiplier comparator), I6
+# (spurious multiplier, all studies at reference), I7 (individual-level
+# twin of I1).
+simulate_multiplicative_levels <- function(config) {
+  dgp <- config$dgp
+  fit <- config$fit
+
+  n_did <- dgp$n_did %||% 0L
+  n_rct <- dgp$n_rct %||% 0L
+  n_pp  <- dgp$n_pp  %||% 0L
+  n_total <- n_did + n_rct + n_pp
+
+  level_assignments <- as.integer(dgp$level_assignments)
+  multipliers       <- dgp$level_multipliers
+  K                 <- length(multipliers)
+  level_names       <- dgp$level_names %||% letters[seq_len(K)]
+
+  stopifnot(
+    length(level_assignments) == n_total,
+    all(level_assignments >= 1L & level_assignments <= K),
+    abs(multipliers[1] - 1) < 1e-9,        # reference must be 1
+    length(level_names) == K
+  )
+
+  per_study_multiplier <- multipliers[level_assignments]
+  per_study_level_name <- level_names[level_assignments]
+
+  # Optional additive covariate contribution to per-study true effect
+  if (!is.null(dgp$covariates) && !is.null(dgp$beta_cov)) {
+    X <- as.matrix(dgp$covariates)
+    cov_effect <- as.numeric(X %*% as.numeric(dgp$beta_cov))
+  } else {
+    cov_effect <- rep(0, n_total)
+  }
+
+  # Per-study true effect mean: m_i · (μ_θ + X_cov_i · β_cov)
+  multiplied_mean <- per_study_multiplier * (dgp$true_effect + cov_effect)
+
+  thetas    <- rnorm(n_total, multiplied_mean, dgp$sigma_effect)
+  betas     <- rnorm(n_total, dgp$true_trend,  dgp$sigma_trend)
+  baselines <- rnorm(n_total, dgp$baseline_mean, dgp$baseline_sd)
+
+  # Study IDs and design assignments (DiD first, then RCT, then PP)
+  ids_did <- if (n_did > 0) paste0("did_", seq_len(n_did)) else character()
+  ids_rct <- if (n_rct > 0) paste0("rct_", seq_len(n_rct)) else character()
+  ids_pp  <- if (n_pp  > 0) paste0("pp_",  seq_len(n_pp))  else character()
+  ids     <- c(ids_did, ids_rct, ids_pp)
+  designs <- c(rep("did", n_did), rep("rct", n_rct), rep("pp", n_pp))
+
+  # Generate per-study observation matrices once; reuse for both summary
+  # and individual output paths.
+  obs_list <- vector("list", n_total)
+  for (i in seq_len(n_total)) {
+    mu_ctrl_pre  <- baselines[i]
+    mu_ctrl_post <- baselines[i] + betas[i]
+    mu_trt_pre   <- baselines[i]
+    mu_trt_post  <- baselines[i] + betas[i] + thetas[i]
+
+    ctrl_obs <- .gen_arm_observations(dgp$n_control,
+                                       mu_ctrl_pre, mu_ctrl_post,
+                                       dgp$within_sd, dgp$rho)
+    trt_obs  <- .gen_arm_observations(dgp$n_treatment,
+                                       mu_trt_pre,  mu_trt_post,
+                                       dgp$within_sd, dgp$rho)
+    obs_list[[i]] <- list(ctrl = ctrl_obs, trt = trt_obs)
+  }
+
+  if (fit$data_format == "individual") {
+    long_frames <- list()
+    for (i in seq_len(n_total)) {
+      design <- designs[i]
+      ctrl_obs <- obs_list[[i]]$ctrl
+      trt_obs  <- obs_list[[i]]$trt
+
+      if (design == "rct") {
+        # RCT: post-period observations only, both arms
+        n_c <- nrow(ctrl_obs); n_t <- nrow(trt_obs)
+        rows <- tibble(
+          study_id   = ids[i],
+          design     = "rct",
+          group      = c(rep("control", n_c), rep("treatment", n_t)),
+          time       = "post",
+          value      = c(ctrl_obs[, 2], trt_obs[, 2])
+        )
+      } else if (design == "pp") {
+        # PP: treatment arm only, both periods
+        n_t <- nrow(trt_obs)
+        rows <- tibble(
+          study_id   = ids[i],
+          subject_id = paste0(ids[i], "_t", rep(seq_len(n_t), times = 2)),
+          design     = "pp",
+          group      = "treatment",
+          time       = rep(c("pre", "post"), each = n_t),
+          value      = c(trt_obs[, 1], trt_obs[, 2])
+        )
+      } else {
+        # DiD: both arms, both periods
+        rows <- .long_rows_one_study(ids[i], "did", ctrl_obs, trt_obs)
+      }
+
+      # Attach study-level columns (level and any additive covariates)
+      rows$level <- per_study_level_name[i]
+      if (!is.null(dgp$covariates)) {
+        for (cn in names(dgp$covariates)) {
+          rows[[cn]] <- dgp$covariates[[cn]][i]
+        }
+      }
+      long_frames[[i]] <- rows
+    }
+    individual <- bind_rows(long_frames)
+    data <- list(individual_data = individual)
+
+  } else {
+    # Summary path
+    summary_frames <- list()
+    for (i in seq_len(n_total)) {
+      design <- designs[i]
+      ctrl_obs <- obs_list[[i]]$ctrl
+      trt_obs  <- obs_list[[i]]$trt
+
+      if (design == "did") {
+        row <- tibble(
+          study_id             = ids[i],
+          design               = "did",
+          n_control            = dgp$n_control,
+          n_treatment          = dgp$n_treatment,
+          mean_pre_control     = mean(ctrl_obs[, 1]),
+          mean_post_control    = mean(ctrl_obs[, 2]),
+          sd_pre_control       = sd(ctrl_obs[, 1]),
+          sd_post_control      = sd(ctrl_obs[, 2]),
+          mean_pre_treatment   = mean(trt_obs[, 1]),
+          mean_post_treatment  = mean(trt_obs[, 2]),
+          sd_pre_treatment     = sd(trt_obs[, 1]),
+          sd_post_treatment    = sd(trt_obs[, 2]),
+          rho                  = (cor(ctrl_obs[, 1], ctrl_obs[, 2]) +
+                                    cor(trt_obs[, 1], trt_obs[, 2])) / 2
+        )
+      } else if (design == "rct") {
+        row <- tibble(
+          study_id            = ids[i],
+          design              = "rct",
+          n_control           = dgp$n_control,
+          n_treatment         = dgp$n_treatment,
+          mean_post_control   = mean(ctrl_obs[, 2]),
+          sd_post_control     = sd(ctrl_obs[, 2]),
+          mean_post_treatment = mean(trt_obs[, 2]),
+          sd_post_treatment   = sd(trt_obs[, 2])
+        )
+      } else {  # pp
+        row <- tibble(
+          study_id            = ids[i],
+          design              = "pp",
+          n_treatment         = dgp$n_treatment,
+          mean_pre_treatment  = mean(trt_obs[, 1]),
+          sd_pre_treatment    = sd(trt_obs[, 1]),
+          mean_post_treatment = mean(trt_obs[, 2]),
+          sd_post_treatment   = sd(trt_obs[, 2]),
+          rho                 = cor(trt_obs[, 1], trt_obs[, 2])
+        )
+      }
+      row$level <- per_study_level_name[i]
+      if (!is.null(dgp$covariates)) {
+        for (cn in names(dgp$covariates)) {
+          row[[cn]] <- dgp$covariates[[cn]][i]
+        }
+      }
+      summary_frames[[i]] <- row
+    }
+    summary_df <- bind_rows(summary_frames)
+    if (!fit$provide_rho && "rho" %in% names(summary_df)) {
+      summary_df$rho <- NA_real_
+    }
+    data <- list(summary_data = summary_df)
+  }
+
+  # Build truth params, appending one column per level for effect_multiplier.
+  true_params <- build_true_params(dgp, config$true, fit$normalise)
+  for (k in seq_len(K)) {
+    col <- paste0("effect_multiplier_", level_names[k])
+    true_params[[col]] <- multipliers[k]
+  }
+
+  list(data = data, true_params = true_params)
+}
+
+# Helper for scenario configs: build a balanced level_assignments vector
+# for n_total studies and K levels (interleaved as evenly as possible).
+balanced_level_assignments <- function(n_total, K) {
+  rep_len(seq_len(K), n_total)
 }

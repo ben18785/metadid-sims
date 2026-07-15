@@ -57,6 +57,14 @@ fit_scenario <- function(sim_result, fit_config) {
     args$covariates <- fit_config$covariates
   }
 
+  # Add multiplicative covariate if specified (multiplicative-covars feature).
+  # Single column name (character); studies at non-reference levels of the
+  # column have their population-mean linear predictor multiplied by the
+  # estimated effect_multiplier[<level>]. Used by the I-category scenarios.
+  if (!is.null(fit_config$multiplicative_covariate)) {
+    args$multiplicative_covariate <- fit_config$multiplicative_covariate
+  }
+
   # Correlated effects (only for meta_did_general)
   if (isTRUE(fit_config$correlated_effects)) {
     args$correlated_effects <- TRUE

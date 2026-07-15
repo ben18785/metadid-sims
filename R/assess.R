@@ -60,6 +60,24 @@ assess_one <- function(posteriors, true_params, fit_config) {
     param_map$treatment_effect_mean_pp  <- paste0("treatment_effect_mean_pp", suffix)
   }
 
+  # Multiplicative-covariate factor multipliers (one per level, including
+  # the reference). The reference level is fixed at 1 in the fit and isn't
+  # sampled, so there's no `effect_multiplier[<reference>]` row in the
+  # posterior — the lookup below returns NULL for that mapping and it gets
+  # silently dropped. Non-reference levels appear as
+  # `effect_multiplier[<level_name>]` in summary().
+  #
+  # The multiplier is a dimensionless ratio (same value on raw and
+  # normalised scales), so no _raw / _normalised suffix is involved.
+  mult_cols <- grep("^effect_multiplier_", names(true_params), value = TRUE)
+  if (length(mult_cols) > 0) {
+    for (col in mult_cols) {
+      level_name <- sub("^effect_multiplier_", "", col)
+      posterior_name <- paste0("effect_multiplier[", level_name, "]")
+      param_map[[posterior_name]] <- col
+    }
+  }
+
   # Assess each mapped parameter
   results <- purrr::imap_dfr(param_map, function(true_col, posterior_name) {
     if (!true_col %in% names(true_params)) return(NULL)

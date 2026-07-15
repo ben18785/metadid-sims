@@ -58,19 +58,20 @@ default_dgp <- list(
 )
 
 default_fit <- list(
-  fn                    = "meta_did",
-  normalise             = TRUE,
-  baseline_latent_arm   = "treatment",
-  robust_heterogeneity  = FALSE,
-  design_effects        = FALSE,
-  correlated_effects    = FALSE,
-  hierarchical_rho      = TRUE,
-  time_trend            = "pooled",
-  baseline_imbalance    = "estimated",
-  pp_likelihood         = "differenced",
-  covariates            = NULL,
-  provide_rho           = TRUE,
-  data_format           = "summary"
+  fn                       = "meta_did",
+  normalise                = TRUE,
+  baseline_latent_arm      = "treatment",
+  robust_heterogeneity     = FALSE,
+  design_effects           = FALSE,
+  correlated_effects       = FALSE,
+  hierarchical_rho         = TRUE,
+  time_trend               = "pooled",
+  baseline_imbalance       = "estimated",
+  pp_likelihood            = "differenced",
+  covariates               = NULL,
+  multiplicative_covariate = NULL,
+  provide_rho              = TRUE,
+  data_format              = "summary"
 )
 
 # Helper: merge user overrides into defaults
@@ -771,6 +772,153 @@ SCENARIO_CONFIGS <- list(
       list(label = "naive",       fn = "meta_did_general",
            time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
     )
+  ),
+
+  # ---------------------------------------------------------------------------
+  # Category I: Multiplicative covariate scenarios
+  #
+  # Tests the multiplicative-covariate feature on the metadid
+  # multiplicative-covars branch: an estimated per-level multiplier applied
+  # to the population-mean linear predictor (treatment_effect_mean +
+  # X_cov · beta_cov). Studies at the reference level keep the linear
+  # predictor unchanged; studies at non-reference levels have it multiplied
+  # by effect_multiplier[<level>], hierarchically distributed around the
+  # multiplied mean.
+  #
+  # All I-category scenarios use the bespoke simulator
+  # simulate_multiplicative_levels (see R/simulate.R) and pair modelled
+  # (normalise = TRUE) vs raw (normalise = FALSE) fits via the compare
+  # block. I5 and I6 additionally pair with-multiplier vs without-multiplier
+  # fits (4 fits per rep) to quantify misspecification.
+  # ---------------------------------------------------------------------------
+
+  I1 = scenario(
+    "Multiplicative covariate: binary balanced, 20 DiD",
+    dgp = list(
+      type              = "bespoke",
+      bespoke_fn        = "simulate_multiplicative_levels",
+      n_did             = 20L,
+      level_assignments = rep_len(1:2, 20),
+      level_multipliers = c(1, 0.6)
+    ),
+    fit = list(multiplicative_covariate = "level"),
+    compare = list(
+      list(label = "modelled", normalise = TRUE),
+      list(label = "raw",      normalise = FALSE)
+    )
+  ),
+
+  I2 = scenario(
+    "Multiplicative covariate: three-level categorical, 30 DiD",
+    dgp = list(
+      type              = "bespoke",
+      bespoke_fn        = "simulate_multiplicative_levels",
+      n_did             = 30L,
+      level_assignments = rep_len(1:3, 30),
+      level_multipliers = c(1, 0.7, 0.4)
+    ),
+    fit = list(multiplicative_covariate = "level"),
+    compare = list(
+      list(label = "modelled", normalise = TRUE),
+      list(label = "raw",      normalise = FALSE)
+    )
+  ),
+
+  I3 = scenario(
+    "Multiplicative + additive: binary multiplier × continuous dose, 30 DiD",
+    dgp = list(
+      type              = "bespoke",
+      bespoke_fn        = "simulate_multiplicative_levels",
+      n_did             = 30L,
+      covariates        = data.frame(dose = seq(1, 4, length.out = 30)),
+      beta_cov          = -0.04,
+      level_assignments = rep_len(1:2, 30),
+      level_multipliers = c(1, 0.6)
+    ),
+    fit = list(
+      covariates               = ~ dose,
+      multiplicative_covariate = "level"
+    ),
+    compare = list(
+      list(label = "modelled", normalise = TRUE),
+      list(label = "raw",      normalise = FALSE)
+    )
+  ),
+
+  I4 = scenario(
+    "Multiplicative covariate: mixed designs (10 DiD + 10 RCT + 10 PP), binary",
+    dgp = list(
+      type              = "bespoke",
+      bespoke_fn        = "simulate_multiplicative_levels",
+      n_did             = 10L,
+      n_rct             = 10L,
+      n_pp              = 10L,
+      level_assignments = rep_len(1:2, 30),
+      level_multipliers = c(1, 0.6)
+    ),
+    fit = list(multiplicative_covariate = "level"),
+    compare = list(
+      list(label = "modelled", normalise = TRUE),
+      list(label = "raw",      normalise = FALSE)
+    )
+  ),
+
+  # I5: truth has multiplicative structure; fit with vs without the multiplier
+  # (each × modelled/raw). Quantifies the cost of omitting the feature.
+  I5 = scenario(
+    "Omit-multiplier misspecification: truth has binary multiplier, fit with vs without (× modelled/raw)",
+    dgp = list(
+      type              = "bespoke",
+      bespoke_fn        = "simulate_multiplicative_levels",
+      n_did             = 30L,
+      level_assignments = rep_len(1:2, 30),
+      level_multipliers = c(1, 0.6)
+    ),
+    compare = list(
+      list(label = "with_modelled",    multiplicative_covariate = "level", normalise = TRUE),
+      list(label = "with_raw",         multiplicative_covariate = "level", normalise = FALSE),
+      list(label = "without_modelled", multiplicative_covariate = NULL,    normalise = TRUE),
+      list(label = "without_raw",      multiplicative_covariate = NULL,    normalise = FALSE)
+    )
+  ),
+
+  # I6: truth has NO multiplicative effect (all true multipliers = 1); fit
+  # with a spurious multiplicative covariate vs without (each × modelled/raw).
+  # Tests that adding the feature when unnecessary doesn't introduce bias.
+  I6 = scenario(
+    "Spurious multiplier: truth has NO multiplicative effect, fit with vs without (× modelled/raw)",
+    dgp = list(
+      type              = "bespoke",
+      bespoke_fn        = "simulate_multiplicative_levels",
+      n_did             = 30L,
+      level_assignments = rep_len(1:2, 30),
+      level_multipliers = c(1, 1)
+    ),
+    compare = list(
+      list(label = "with_modelled",    multiplicative_covariate = "level", normalise = TRUE),
+      list(label = "with_raw",         multiplicative_covariate = "level", normalise = FALSE),
+      list(label = "without_modelled", multiplicative_covariate = NULL,    normalise = TRUE),
+      list(label = "without_raw",      multiplicative_covariate = NULL,    normalise = FALSE)
+    )
+  ),
+
+  I7 = scenario(
+    "Multiplicative covariate, individual-level data, 20 DiD",
+    dgp = list(
+      type              = "bespoke",
+      bespoke_fn        = "simulate_multiplicative_levels",
+      n_did             = 20L,
+      level_assignments = rep_len(1:2, 20),
+      level_multipliers = c(1, 0.6)
+    ),
+    fit = list(
+      data_format              = "individual",
+      multiplicative_covariate = "level"
+    ),
+    compare = list(
+      list(label = "modelled", normalise = TRUE),
+      list(label = "raw",      normalise = FALSE)
+    )
   )
 )
 
@@ -842,7 +990,11 @@ scenario_summary_table <- function(category) {
   E = c("naive", "robust"),
   F = c("robust"),
   G = character(),
-  H = character()
+  H = character(),
+  # Category I scenarios manage their own modelled/raw and with/without
+  # comparators via per-scenario `compare` blocks, so no programmatic
+  # cross-cutting comparators are added.
+  I = character()
 )
 
 # Coerce one config value (which may be NULL, a formula, a data.frame, a
