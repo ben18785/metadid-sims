@@ -18,8 +18,6 @@
 #     normalise              logical — TRUE expresses effects as fractions of
 #                            the treatment-pre baseline, FALSE pools on the
 #                            absolute (user-units) scale
-#     baseline_latent_arm    "treatment" (default) or "control" — which arm's
-#                            baseline is the per-study latent in modelled mode
 #     robust_heterogeneity, design_effects, correlated_effects
 #     hierarchical_rho
 #     time_trend, baseline_imbalance, pp_likelihood (for meta_did_general)
@@ -60,7 +58,6 @@ default_dgp <- list(
 default_fit <- list(
   fn                       = "meta_did",
   normalise                = TRUE,
-  baseline_latent_arm      = "treatment",
   robust_heterogeneity     = FALSE,
   design_effects           = FALSE,
   correlated_effects       = FALSE,
@@ -312,24 +309,6 @@ SCENARIO_CONFIGS <- list(
     compare = list(
       list(label = "full",  fn = "meta_did"),
       list(label = "naive", fn = "meta_did_general", baseline_imbalance = "fixed_zero")
-    )
-  ),
-
-  # B7: paired comparison of the two modelled-mode parameterisations.
-  # The two options of baseline_latent_arm encode the same statistical model
-  # — they differ only in which arm's pre-baseline is the per-study latent
-  # with the wide uniform prior, and which is derived via the hierarchical
-  # baseline-imbalance parameter. In well-identified problems (decent sample
-  # sizes, both arms observed) the two should give numerically equivalent
-  # posteriors on every population-level parameter. This scenario fits the
-  # same simulated data under both choices and lets the validation report
-  # show the agreement (or any discrepancy under stress regimes).
-  B7 = scenario(
-    "Baseline-latent-arm parameterisation: treatment vs control, 30 DiD",
-    dgp = list(n_did = 30L),
-    compare = list(
-      list(label = "treatment_latent", baseline_latent_arm = "treatment"),
-      list(label = "control_latent",   baseline_latent_arm = "control")
     )
   ),
 
@@ -1025,7 +1004,6 @@ scenario_summary_table <- function(category) {
   list(
     fn                    = "meta_did_general",
     normalise             = base_fit$normalise,
-    baseline_latent_arm   = base_fit$baseline_latent_arm %||% "treatment",
     robust_heterogeneity  = FALSE,
     design_effects        = base_fit$design_effects,
     correlated_effects    = FALSE,

@@ -43,8 +43,7 @@ fit_scenario <- function(sim_result, fit_config) {
   args <- c(
     data,  # unpacks to summary_data = ... and/or individual_data = ...
     list(
-      normalise             = fit_config$normalise,
-      baseline_latent_arm   = fit_config$baseline_latent_arm %||% "treatment",
+      normalise_by_baseline = fit_config$normalise,
       robust_heterogeneity  = fit_config$robust_heterogeneity,
       design_effects        = fit_config$design_effects,
       hierarchical_rho      = fit_config$hierarchical_rho

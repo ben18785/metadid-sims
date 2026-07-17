@@ -11,7 +11,7 @@ library(metadid)
 #'
 #' Simulates the same data as run_one_rep() for the same scenario_id and
 #' rep_seed, then fits meta_did_general with fixed-zero trend and imbalance.
-#' normalise, baseline_latent_arm, design_effects, and hierarchical_rho are preserved
+#' normalise, design_effects, and hierarchical_rho are preserved
 #' from the base scenario config so like-for-like comparisons are valid.
 #'
 #' @param scenario_id String identifying the scenario in SCENARIO_CONFIGS
@@ -22,12 +22,11 @@ run_naive_rep <- function(scenario_id, config, rep_seed, pkg = NULL) {
   sim <- simulate_scenario(scenario_id, rep_seed, config)
 
   # Build naive config: meta_did_general, zero trend, zero imbalance.
-  # Propagate normalise + baseline_latent_arm from the base config so the
-  # naive comparator runs on the same canonical scale as the primary fit.
+  # Propagate normalise from the base config so the naive comparator runs on
+  # the same canonical scale as the primary fit.
   naive_config <- list(
     fn                    = "meta_did_general",
     normalise             = config$fit$normalise,
-    baseline_latent_arm   = config$fit$baseline_latent_arm %||% "treatment",
     robust_heterogeneity  = FALSE,
     design_effects        = config$fit$design_effects,
     hierarchical_rho      = config$fit$hierarchical_rho,
