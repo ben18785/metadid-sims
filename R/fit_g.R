@@ -20,8 +20,7 @@ run_g_rep <- function(scenario_id, config, rep_seed, pkg = NULL) {
   args <- c(
     sim$data,
     list(
-      normalise             = fit_config$normalise,
-      baseline_latent_arm   = fit_config$baseline_latent_arm %||% "treatment",
+      normalise_by_baseline = fit_config$normalise,  # reverted metadid API (see metadid#39)
       robust_heterogeneity  = fit_config$robust_heterogeneity,
       design_effects        = fit_config$design_effects,
       hierarchical_rho      = fit_config$hierarchical_rho

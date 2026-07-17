@@ -139,7 +139,36 @@ assemble_data <- function(sim, dgp, fit) {
 # ===========================================================================
 
 build_true_params <- function(dgp, extra_true, normalised) {
-  bm <- dgp$baseline_mean
+  bm  <- dgp$baseline_mean
+  bsd <- if (!is.null(dgp$baseline_sd)) dgp$baseline_sd else 0
+
+  # --- Normalised (percentage-scale) truths ---------------------------------
+  # The per-study normalised effect is theta_i / b_i (a unit-free, percentage-
+  # scale effect size); the model pools these across studies, so the population
+  # estimand is the MEAN of per-study proportional effects, E[theta_i / b_i],
+  # with heterogeneity SD[theta_i / b_i].
+  #
+  # This is NOT true_effect / baseline_mean (= E[theta] / E[baseline]). When
+  # baselines vary across studies the two differ by the between-study baseline
+  # CV^2 (Jensen's inequality), and averaging raw absolute effects across studies
+  # is meaningless when studies are on different scales. Scoring the per-study
+  # model against E[theta] / E[baseline] is what produced the spurious "G8 bias".
+  # See ben18785/metadid#39.
+  #
+  # Moments are computed by the delta method (the leading expansion of the
+  # per-study ratio theta/b around the means). A full Monte-Carlo expectation
+  # over a Gaussian baseline is unusable here because E[theta/b] and Var(theta/b)
+  # are dominated by the (unrealistic) near-zero baseline tail of 1/b; the delta
+  # approximation matches the regime the model actually sees and is what the
+  # historical raw/bm convention was the zeroth-order version of. With
+  # baseline_sd == 0 these reduce exactly to the raw/bm values.
+  #   E[theta/b]   ~= (E[theta]/bm) * (1 + CV_b^2)
+  #   Var(theta/b) ~= ( sigma_theta^2 + E[theta]^2 * CV_b^2 ) / bm^2
+  # inv_b_factor = (1 + CV_b^2) rescales a /bm mean into the E[effect/b] mean.
+  cv_b2        <- (bsd / bm)^2
+  inv_b_factor <- 1 + cv_b2
+  te_sd_normalised <- sqrt(dgp$sigma_effect^2 + dgp$true_effect^2 * cv_b2) / bm
+  tt_sd_normalised <- sqrt(dgp$sigma_trend^2  + dgp$true_trend^2  * cv_b2) / bm
 
   params <- tibble(
     treatment_effect_mean_raw        = dgp$true_effect,
@@ -147,10 +176,10 @@ build_true_params <- function(dgp, extra_true, normalised) {
     time_trend_mean_raw              = dgp$true_trend,
     time_trend_sd_raw                = dgp$sigma_trend,
     baseline_mean                    = bm,
-    treatment_effect_mean_normalised = dgp$true_effect / bm,
-    treatment_effect_sd_normalised   = dgp$sigma_effect / bm,
-    time_trend_mean_normalised       = dgp$true_trend / bm,
-    time_trend_sd_normalised         = dgp$sigma_trend / bm,
+    treatment_effect_mean_normalised = (dgp$true_effect / bm) * inv_b_factor,
+    treatment_effect_sd_normalised   = te_sd_normalised,
+    time_trend_mean_normalised       = (dgp$true_trend / bm) * inv_b_factor,
+    time_trend_sd_normalised         = tt_sd_normalised,
     normalised                       = normalised
   )
 
@@ -159,13 +188,13 @@ build_true_params <- function(dgp, extra_true, normalised) {
     cov_names <- names(dgp$covariates)
     for (i in seq_along(dgp$beta_cov)) {
       params[[paste0("beta_cov_", cov_names[i], "_raw")]] <- dgp$beta_cov[i]
-      params[[paste0("beta_cov_", cov_names[i], "_normalised")]] <- dgp$beta_cov[i] / bm
+      params[[paste0("beta_cov_", cov_names[i], "_normalised")]] <- (dgp$beta_cov[i] / bm) * inv_b_factor
     }
     # True effect at mean covariate value (for centered covariates)
     mean_cov <- colMeans(dgp$covariates)
     effect_at_mean <- dgp$true_effect + sum(mean_cov * dgp$beta_cov)
     params$treatment_effect_at_mean_cov_raw        <- effect_at_mean
-    params$treatment_effect_at_mean_cov_normalised  <- effect_at_mean / bm
+    params$treatment_effect_at_mean_cov_normalised  <- (effect_at_mean / bm) * inv_b_factor
   }
 
   # Design-specific effects (F7 etc.)
@@ -176,8 +205,8 @@ build_true_params <- function(dgp, extra_true, normalised) {
     params$delta_pp_raw                           <- extra_true$delta_pp
     params$treatment_effect_mean_rct_raw          <- rct_effect
     params$treatment_effect_mean_pp_raw           <- pp_effect
-    params$treatment_effect_mean_rct_normalised   <- rct_effect / bm
-    params$treatment_effect_mean_pp_normalised    <- pp_effect / bm
+    params$treatment_effect_mean_rct_normalised   <- (rct_effect / bm) * inv_b_factor
+    params$treatment_effect_mean_pp_normalised    <- (pp_effect / bm) * inv_b_factor
   }
 
   # Rho for effect-trend correlation
