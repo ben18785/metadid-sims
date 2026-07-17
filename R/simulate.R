@@ -999,6 +999,17 @@ simulate_extreme_rho <- function(config) {
 #                       of the effect_multiplier_<name> truth columns and
 #                       the level column emitted in the data. Defaults to
 #                       letters[1:K] so e.g. "a" is the reference.
+#   level2_assignments / level2_multipliers / level2_names
+#                     — same as the level_* fields but for an optional
+#                       SECOND multiplicative covariate (emitted as a
+#                       `level2` column). When present, each study's
+#                       overall factor is the PRODUCT of its two
+#                       per-covariate multipliers, matching metadid's
+#                       `multiplicative_covariate = ~ level + level2`
+#                       product structure. With two covariates the truth
+#                       columns are named effect_multiplier_<column>:<name>
+#                       to match metadid's two-covariate posterior labels
+#                       effect_multiplier[<column>:<level>].
 #   covariates / beta_cov — standard additive covariate fields (passed
 #                       through as in simulate_meta_did).
 #
@@ -1011,7 +1022,8 @@ simulate_extreme_rho <- function(config) {
 # Used by: I1 (binary, balanced), I2 (three-level), I3 (multiplicative +
 # additive), I4 (mixed designs), I5 (omit-multiplier comparator), I6
 # (spurious multiplier, all studies at reference), I7 (individual-level
-# twin of I1).
+# twin of I1), I8 (two-covariate product, binary × binary), I9
+# (two-covariate product, binary × three-level).
 simulate_multiplicative_levels <- function(config) {
   dgp <- config$dgp
   fit <- config$fit
@@ -1033,7 +1045,26 @@ simulate_multiplicative_levels <- function(config) {
     length(level_names) == K
   )
 
+  # Optional second multiplicative covariate (product structure)
+  has_second <- !is.null(dgp$level2_multipliers)
+  if (has_second) {
+    level2_assignments <- as.integer(dgp$level2_assignments)
+    multipliers2       <- dgp$level2_multipliers
+    K2                 <- length(multipliers2)
+    level2_names       <- dgp$level2_names %||% letters[seq_len(K2)]
+    stopifnot(
+      length(level2_assignments) == n_total,
+      all(level2_assignments >= 1L & level2_assignments <= K2),
+      abs(multipliers2[1] - 1) < 1e-9,     # reference must be 1
+      length(level2_names) == K2
+    )
+    per_study_level2_name <- level2_names[level2_assignments]
+  }
+
   per_study_multiplier <- multipliers[level_assignments]
+  if (has_second) {
+    per_study_multiplier <- per_study_multiplier * multipliers2[level2_assignments]
+  }
   per_study_level_name <- level_names[level_assignments]
 
   # Optional additive covariate contribution to per-study true effect
@@ -1111,6 +1142,7 @@ simulate_multiplicative_levels <- function(config) {
 
       # Attach study-level columns (level and any additive covariates)
       rows$level <- per_study_level_name[i]
+      if (has_second) rows$level2 <- per_study_level2_name[i]
       if (!is.null(dgp$covariates)) {
         for (cn in names(dgp$covariates)) {
           rows[[cn]] <- dgp$covariates[[cn]][i]
@@ -1170,6 +1202,7 @@ simulate_multiplicative_levels <- function(config) {
         )
       }
       row$level <- per_study_level_name[i]
+      if (has_second) row$level2 <- per_study_level2_name[i]
       if (!is.null(dgp$covariates)) {
         for (cn in names(dgp$covariates)) {
           row[[cn]] <- dgp$covariates[[cn]][i]
@@ -1185,10 +1218,22 @@ simulate_multiplicative_levels <- function(config) {
   }
 
   # Build truth params, appending one column per level for effect_multiplier.
+  # With one covariate metadid labels posteriors effect_multiplier[<level>];
+  # with two it labels them effect_multiplier[<column>:<level>], so the truth
+  # columns follow the same convention for assess_one()'s mapping.
   true_params <- build_true_params(dgp, config$true, fit$normalise)
-  for (k in seq_len(K)) {
-    col <- paste0("effect_multiplier_", level_names[k])
-    true_params[[col]] <- multipliers[k]
+  if (has_second) {
+    for (k in seq_len(K)) {
+      true_params[[paste0("effect_multiplier_level:", level_names[k])]] <- multipliers[k]
+    }
+    for (k in seq_len(K2)) {
+      true_params[[paste0("effect_multiplier_level2:", level2_names[k])]] <- multipliers2[k]
+    }
+  } else {
+    for (k in seq_len(K)) {
+      col <- paste0("effect_multiplier_", level_names[k])
+      true_params[[col]] <- multipliers[k]
+    }
   }
 
   list(data = data, true_params = true_params)
