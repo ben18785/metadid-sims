@@ -57,9 +57,12 @@ fit_scenario <- function(sim_result, fit_config) {
   }
 
   # Add multiplicative covariate if specified (multiplicative-covars feature).
-  # Single column name (character); studies at non-reference levels of the
-  # column have their population-mean linear predictor multiplied by the
-  # estimated effect_multiplier[<level>]. Used by the I-category scenarios.
+  # Either a single column name (character) or a one-sided formula naming up
+  # to two columns (~ a + b, product structure). Studies at non-reference
+  # levels have their population-mean linear predictor multiplied by the
+  # estimated effect_multiplier[<level>] (one covariate) or
+  # effect_multiplier[<column>:<level>] factors (two covariates). Used by
+  # the I-category scenarios.
   if (!is.null(fit_config$multiplicative_covariate)) {
     args$multiplicative_covariate <- fit_config$multiplicative_covariate
   }

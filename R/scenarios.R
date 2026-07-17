@@ -898,6 +898,48 @@ SCENARIO_CONFIGS <- list(
       list(label = "modelled", normalise = TRUE),
       list(label = "raw",      normalise = FALSE)
     )
+  ),
+
+  # I8/I9: TWO multiplicative covariates fitted as a product via the formula
+  # interface (~ level + level2). Each study's overall factor is the product
+  # of its two per-covariate multipliers; assignments are crossed so every
+  # cell of the (level × level2) table is occupied and the two factors are
+  # separately identified.
+
+  I8 = scenario(
+    "Two-multiplier product: binary (1, 0.6) × binary (1, 1.4), 30 DiD",
+    dgp = list(
+      type               = "bespoke",
+      bespoke_fn         = "simulate_multiplicative_levels",
+      n_did              = 30L,
+      level_assignments  = rep_len(1:2, 30),
+      level_multipliers  = c(1, 0.6),
+      level2_assignments = rep_len(rep(1:2, each = 2), 30),
+      level2_multipliers = c(1, 1.4)
+    ),
+    fit = list(multiplicative_covariate = ~ level + level2),
+    compare = list(
+      list(label = "modelled", normalise = TRUE),
+      list(label = "raw",      normalise = FALSE)
+    )
+  ),
+
+  I9 = scenario(
+    "Two-multiplier product: binary (1, 0.6) × three-level (1, 0.7, 0.4), 30 DiD",
+    dgp = list(
+      type               = "bespoke",
+      bespoke_fn         = "simulate_multiplicative_levels",
+      n_did              = 30L,
+      level_assignments  = rep_len(1:2, 30),
+      level_multipliers  = c(1, 0.6),
+      level2_assignments = rep_len(rep(1:3, each = 2), 30),
+      level2_multipliers = c(1, 0.7, 0.4)
+    ),
+    fit = list(multiplicative_covariate = ~ level + level2),
+    compare = list(
+      list(label = "modelled", normalise = TRUE),
+      list(label = "raw",      normalise = FALSE)
+    )
   )
 )
 
