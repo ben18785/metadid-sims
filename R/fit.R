@@ -231,8 +231,10 @@ reassemble_data <- function(sim, dgp, fit_config) {
   #
   # For now, this only handles the provide_rho override case.
   sim_copy <- sim
-  if (!is.null(sim_copy$data$summary_data) && !fit_config$provide_rho) {
-    sim_copy$data$summary_data$rho <- NA_real_
+  if (!is.null(sim_copy$data$summary_data) &&
+      "rho" %in% names(sim_copy$data$summary_data)) {
+    sim_copy$data$summary_data$rho <-
+      apply_provide_rho(sim_copy$data$summary_data$rho, fit_config$provide_rho)
   }
   sim_copy
 }

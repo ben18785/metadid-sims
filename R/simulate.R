@@ -37,6 +37,26 @@ simulate_scenario <- function(scenario_id, rep_seed, config) {
 }
 
 # ===========================================================================
+# provide_rho helper: controls how many summary studies report their rho.
+#   TRUE       -> all studies keep their reported rho
+#   FALSE      -> all rho set to NA (none reported)
+#   p in [0,1] -> the first round(p * n) studies keep rho, the rest become NA
+# A partial value lets a scenario exercise hierarchical rho *imputation* while
+# still supplying enough reported correlations to anchor the hierarchy (metadid
+# now errors if hierarchical_rho = TRUE with no reported rho at all).
+# ===========================================================================
+
+apply_provide_rho <- function(rho, provide) {
+  n <- length(rho)
+  if (isTRUE(provide))  return(rho)
+  if (isFALSE(provide)) return(rep(NA_real_, n))
+  stopifnot(is.numeric(provide), length(provide) == 1, provide >= 0, provide <= 1)
+  n_keep <- round(provide * n)
+  if (n_keep < n) rho[seq.int(n_keep + 1L, n)] <- NA_real_
+  rho
+}
+
+# ===========================================================================
 # Standard simulation via metadid::simulate_meta_did()
 # ===========================================================================
 
@@ -113,7 +133,7 @@ assemble_data <- function(sim, dgp, fit) {
     did_sim <- sim[sim$study_id %in% did_ids, ]
     attr(did_sim, "true_params") <- attr(sim, "true_params")
     did_summary <- metadid::as_summary_did(did_sim)
-    if (!fit$provide_rho) did_summary$rho <- NA_real_
+    did_summary$rho <- apply_provide_rho(did_summary$rho, fit$provide_rho)
     frames$did <- did_summary
   }
   if (length(rct_ids) > 0) {
@@ -127,7 +147,7 @@ assemble_data <- function(sim, dgp, fit) {
     pp_sim$study_id <- paste0("pp_", pp_sim$study_id)
     attr(pp_sim, "true_params") <- attr(sim, "true_params")
     pp_summary <- metadid::as_summary_pp(pp_sim)
-    if (!fit$provide_rho) pp_summary$rho <- NA_real_
+    pp_summary$rho <- apply_provide_rho(pp_summary$rho, fit$provide_rho)
     frames$pp <- pp_summary
   }
   summary_df <- bind_rows(frames)
@@ -1211,8 +1231,8 @@ simulate_multiplicative_levels <- function(config) {
       summary_frames[[i]] <- row
     }
     summary_df <- bind_rows(summary_frames)
-    if (!fit$provide_rho && "rho" %in% names(summary_df)) {
-      summary_df$rho <- NA_real_
+    if ("rho" %in% names(summary_df)) {
+      summary_df$rho <- apply_provide_rho(summary_df$rho, fit$provide_rho)
     }
     data <- list(summary_data = summary_df)
   }

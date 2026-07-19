@@ -22,7 +22,11 @@
 #     hierarchical_rho
 #     time_trend, baseline_imbalance, pp_likelihood (for meta_did_general)
 #     covariates      (formula or NULL)
-#     provide_rho     Whether to include rho in summary data (default TRUE)
+#     provide_rho     Whether to include rho in summary data (default TRUE).
+#                     TRUE = all studies report rho, FALSE = none, or a
+#                     fraction p in [0,1] = the first round(p*n) studies report
+#                     rho and the rest are left missing (for hierarchical
+#                     imputation with an anchoring subset).
 #     data_format     "summary" or "individual"
 #
 #   true:  Named list of true parameter values on the RAW scale.
@@ -545,9 +549,13 @@ SCENARIO_CONFIGS <- list(
   ),
 
   E6 = scenario(
-    "Missing rho: hierarchical_rho imputes",
+    # Half the studies report rho; the hierarchical model imputes the rest by
+    # borrowing strength from the reported ones. (Fitting with NO reported rho
+    # is now an error in metadid — the hierarchy has nothing to anchor to — so
+    # this scenario supplies an anchoring subset rather than none.)
+    "Partial rho: hierarchical_rho imputes the missing half from the reported half",
     dgp = list(n_did = 20L),
-    fit = list(provide_rho = FALSE, hierarchical_rho = TRUE)
+    fit = list(provide_rho = 0.5, hierarchical_rho = TRUE)
   ),
 
   # ---------------------------------------------------------------------------
