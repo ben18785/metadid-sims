@@ -216,7 +216,17 @@ SCENARIO_CONFIGS <- list(
 
   F7 = scenario(
     "Large mixed, design effects: 35 DiD + 35 RCT + 30 PP with offsets",
-    dgp = list(n_did = 35L, n_rct = 35L, n_pp = 30L),
+    # The design offsets must be injected into the data (dgp$delta_rct/pp,
+    # read by simulate_design_offsets) AND declared as truths (true$delta_rct/pp,
+    # read by build_true_params). The default `type = "metadid"` simulator has
+    # no offset argument, so routing here is required for the RCT/PP arms to
+    # actually carry the shift the fit is scored against.
+    dgp = list(
+      type       = "bespoke",
+      bespoke_fn = "simulate_design_offsets",
+      n_did      = 35L, n_rct = 35L, n_pp = 30L,
+      delta_rct  = 0.10, delta_pp = -0.08
+    ),
     fit = list(design_effects = TRUE),
     true = list(delta_rct = 0.10, delta_pp = -0.08)
   ),
