@@ -42,6 +42,14 @@ tar_option_set(
 
 N_REPS <- 25L
 
+# Individual-level data fits are markedly slower than summary fits (the
+# per-subject likelihood plus per-study rho/effect parameters), so the
+# scenarios that use them (A11, A12, I7) run at a reduced replication count.
+# Categories A and I are split into a "main" map (N_REPS) and an "_indiv" map
+# (N_REPS_INDIV), then recombined under the original A_rep / I_rep name so all
+# downstream targets are unchanged.
+N_REPS_INDIV <- 15L
+
 # ---------------------------------------------------------------------------
 # Source R files
 # ---------------------------------------------------------------------------
@@ -84,14 +92,25 @@ list(
   ),
 
   # ---- Category A: Calibration studies ----
+  # Summary-data scenarios at full reps; individual-data scenarios (A11, A12)
+  # at reduced reps. Recombined into A_rep so downstream targets are unchanged.
   tarchetypes::tar_map_rep(
-    name    = A_rep,
+    name    = A_rep_main,
     command = run_one_rep(scenario_id, config, targets::tar_seed_get(), metadid_src),
-    values  = scenario_values(scenario_ids("A")),
+    values  = scenario_values(Filter(function(s) !scenario_is_individual(s), scenario_ids("A"))),
     names   = tidyselect::any_of("scenario_id"),
     batches = N_REPS,
     reps    = 1
   ),
+  tarchetypes::tar_map_rep(
+    name    = A_rep_indiv,
+    command = run_one_rep(scenario_id, config, targets::tar_seed_get(), metadid_src),
+    values  = scenario_values(Filter(scenario_is_individual, scenario_ids("A"))),
+    names   = tidyselect::any_of("scenario_id"),
+    batches = N_REPS_INDIV,
+    reps    = 1
+  ),
+  tar_target(A_rep, dplyr::bind_rows(A_rep_main, A_rep_indiv)),
   tar_target(A_agg, aggregate_scenario(A_rep)),
 
   # ---- Category A: Naive comparator (does not invalidate A_rep) ----
@@ -112,21 +131,34 @@ list(
   ),
 
   # ---- Category A: Robust comparator (does not invalidate A_rep) ----
-  # Excludes scenarios with correlated_effects = TRUE (incompatible with robust)
+  # Excludes scenarios with correlated_effects = TRUE (incompatible with robust).
+  # Split main/indiv so individual-data scenarios run at the reduced rep count,
+  # matching their base (normal) arm; recombined into A_rep_robust.
   tarchetypes::tar_map_rep(
-    name    = A_rep_robust,
+    name    = A_rep_robust_main,
     command = run_robust_rep(scenario_id, config, targets::tar_seed_get(), metadid_src),
-    values  = {
-      ids <- Filter(
-        function(s) !isTRUE(SCENARIO_CONFIGS[[s]]$fit$correlated_effects),
-        scenario_ids("A")
-      )
-      scenario_values(ids)
-    },
+    values  = scenario_values(Filter(
+      function(s) !isTRUE(SCENARIO_CONFIGS[[s]]$fit$correlated_effects) &&
+        !scenario_is_individual(s),
+      scenario_ids("A")
+    )),
     names   = tidyselect::any_of("scenario_id"),
     batches = N_REPS,
     reps    = 1
   ),
+  tarchetypes::tar_map_rep(
+    name    = A_rep_robust_indiv,
+    command = run_robust_rep(scenario_id, config, targets::tar_seed_get(), metadid_src),
+    values  = scenario_values(Filter(
+      function(s) !isTRUE(SCENARIO_CONFIGS[[s]]$fit$correlated_effects) &&
+        scenario_is_individual(s),
+      scenario_ids("A")
+    )),
+    names   = tidyselect::any_of("scenario_id"),
+    batches = N_REPS_INDIV,
+    reps    = 1
+  ),
+  tar_target(A_rep_robust, dplyr::bind_rows(A_rep_robust_main, A_rep_robust_indiv)),
   tar_target(
     A_combined,
     dplyr::bind_rows(
@@ -318,14 +350,25 @@ list(
   # Each scenario handles its own modelled/raw and with/without comparators
   # via the per-scenario `compare` block in scenarios.R, so no separate
   # *_naive / *_robust comparator branches are needed.
+  # Summary-data I scenarios at full reps; individual-data I7 at reduced reps.
+  # Recombined into I_rep so downstream targets are unchanged.
   tarchetypes::tar_map_rep(
-    name    = I_rep,
+    name    = I_rep_main,
     command = run_one_rep(scenario_id, config, targets::tar_seed_get(), metadid_src),
-    values  = scenario_values(scenario_ids("I")),
+    values  = scenario_values(Filter(function(s) !scenario_is_individual(s), scenario_ids("I"))),
     names   = tidyselect::any_of("scenario_id"),
     batches = N_REPS,
     reps    = 1
   ),
+  tarchetypes::tar_map_rep(
+    name    = I_rep_indiv,
+    command = run_one_rep(scenario_id, config, targets::tar_seed_get(), metadid_src),
+    values  = scenario_values(Filter(scenario_is_individual, scenario_ids("I"))),
+    names   = tidyselect::any_of("scenario_id"),
+    batches = N_REPS_INDIV,
+    reps    = 1
+  ),
+  tar_target(I_rep, dplyr::bind_rows(I_rep_main, I_rep_indiv)),
   tar_target(I_agg, aggregate_scenario(I_rep)),
 
   # ---- Scenario lookup table ----

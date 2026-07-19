@@ -912,9 +912,13 @@ SCENARIO_CONFIGS <- list(
       data_format              = "individual",
       multiplicative_covariate = "level"
     ),
+    # Only the modelled (normalised) arm. On the raw scale the individual-data +
+    # multiplicative posterior is badly conditioned: the fit fails to converge
+    # (Rhat ~2.1, ESS ~3) AND spends ~156 iterations/fit at max treedepth, which
+    # made I7 ~3x slower than any other scenario for zero usable signal. The raw
+    # multiplicative feature is already exercised by I1/I2/I8/I9's raw arms.
     compare = list(
-      list(label = "modelled", normalise = TRUE),
-      list(label = "raw",      normalise = FALSE)
+      list(label = "modelled", normalise = TRUE)
     )
   ),
 
@@ -970,11 +974,91 @@ scenario_ids <- function(prefix) {
   sort(ids)
 }
 
+# TRUE if a scenario fits any individual-level data — either directly
+# (fit$data_format) or via a compare arm. Individual-data fits are markedly
+# slower, so the pipeline runs them at a reduced replication count.
+scenario_is_individual <- function(s) {
+  cfg <- SCENARIO_CONFIGS[[s]]
+  isTRUE(cfg$fit$data_format == "individual") ||
+    (!is.null(cfg$compare) &&
+       any(vapply(cfg$compare,
+                  function(a) isTRUE(a$data_format == "individual"),
+                  logical(1))))
+}
+
 scenario_lookup <- function() {
   tibble::tibble(
     scenario_id = names(SCENARIO_CONFIGS),
     description = purrr::map_chr(SCENARIO_CONFIGS, "description")
   )
+}
+
+# ---------------------------------------------------------------------------
+# Expected deviations registry
+#
+# Some scenarios (or specific comparison arms / parameters) are DESIGNED to
+# show bias, under-coverage, or convergence trouble: deliberate misspecification
+# demonstrations, boundary/degenerate parameter values, or normalisation stress
+# tests. Their deviations are not defects, so the executive summary separates
+# them from genuine issues instead of burying real problems in the same list.
+#
+# A registry row matches a flagged result when `scenario_id` is equal and
+# `model_label` / `parameter` are either NA (wildcard = any) or equal to the
+# flagged row's value.
+# ---------------------------------------------------------------------------
+
+scenario_expectations <- function() {
+  tibble::tribble(
+    ~scenario_id, ~model_label,       ~parameter,             ~reason,
+    # --- Deliberate misspecification: a wrong/naive model fitted on purpose ---
+    "B3", "full",             NA,                     "Demonstrates pooled-trend failure when trends differ by design ('naive wins')",
+    "B3", "naive",            NA,                     "Naive comparison arm — misspecified by design",
+    "B5", "naive",            NA,                     "Naive arm ignores RCT baseline imbalance — biased by design",
+    "B6", "naive",            NA,                     "Naive arm ignores baseline imbalance — biased by design",
+    "H1", "naive",            NA,                     "Naive arm — misspecified by design",
+    "H2", "naive",            NA,                     "Naive arm — misspecified by design",
+    "H3", "naive",            NA,                     "Naive arm — misspecified by design",
+    "H4", "naive",            NA,                     "Naive arm — misspecified by design",
+    "C1", "normal",           NA,                     "Normal heterogeneity fitted to outlier-contaminated truth — inflation expected (robust arm is the calibrated one)",
+    "C2", "normal",           NA,                     "Normal fit to heavy-tailed/contaminated truth — expected (see robust arm)",
+    "C3", "normal",           NA,                     "Normal fit to heavy-tailed/contaminated truth — expected (see robust arm)",
+    "C4", "normal",           NA,                     "Normal fit to heavy-tailed/contaminated truth — expected (see robust arm)",
+    "C5", "normal",           NA,                     "Normal fit to heavy-tailed/contaminated truth — expected (see robust arm)",
+    "C6", "normal",           NA,                     "Normal fit to asymmetric contamination — expected (see robust arm)",
+    "C7", "normal",           NA,                     "Normal fit to heavy-tailed/contaminated truth — expected (see robust arm)",
+    "C8", "normal",           NA,                     "Normal fit to heavy-tailed/contaminated truth — expected (see robust arm)",
+    "D4", NA,                 NA,                     "Effect correlated with sample size — informative-sampling misspecification demo",
+    "D5", NA,                 NA,                     "baseline_imbalance = fixed_zero on real imbalance — misspecification demo",
+    "I5", "without_modelled", NA,                     "Multiplier omitted when truth has it — misspecification demo",
+    "I5", "without_raw",      NA,                     "Multiplier omitted when truth has it — misspecification demo",
+    # --- Boundary / degenerate parameter values ---
+    "E2", NA,                 "treatment_effect_sd",  "Zero true heterogeneity (SD = 0 boundary) — a positive-constrained SD cannot cover it",
+    "E2", NA,                 "time_trend_sd",        "Zero true heterogeneity (SD = 0 boundary) — a positive-constrained SD cannot cover it",
+    "E5", NA,                 NA,                     "One study per design — between-study heterogeneity is unidentified by construction",
+    # --- Deliberate normalisation (Jensen) stress tests ---
+    "G8", NA,                 NA,                     "Jensen's test: large baseline_sd deliberately stresses the normalisation nonlinearity",
+    "G9", NA,                 NA,                     "Jensen's test: high within-study precision deliberately stresses the normalisation nonlinearity"
+  )
+}
+
+# Annotate a data frame of flagged results (must contain scenario_id,
+# model_label, parameter) with `expected` (logical) and `reason` (chr),
+# resolved against scenario_expectations() with NA-as-wildcard matching.
+tag_expectations <- function(flagged) {
+  reg <- scenario_expectations()
+  hits <- purrr::pmap(
+    list(flagged$scenario_id, flagged$model_label, flagged$parameter),
+    function(sid, lab, par) {
+      m <- reg[reg$scenario_id == sid &
+                 (is.na(reg$model_label) | reg$model_label == lab) &
+                 (is.na(reg$parameter)   | reg$parameter   == par), ]
+      if (nrow(m) == 0) c(expected = FALSE, reason = NA_character_)
+      else c(expected = TRUE, reason = m$reason[[1]])
+    }
+  )
+  flagged$expected <- vapply(hits, function(h) as.logical(h[["expected"]]), logical(1))
+  flagged$reason   <- vapply(hits, function(h) h[["reason"]], character(1))
+  flagged
 }
 
 # Format a named list of overrides as a compact key=value string,

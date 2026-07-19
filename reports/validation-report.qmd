@@ -38,37 +38,62 @@ scenario_lookup_tbl <- scenario_lookup()
 ## Executive Summary
 
 ```{r exec-summary}
-# Flag scenarios with empirical coverage below 80% for the treatment effect
-poor_coverage <- all_agg |>
-  filter(parameter == "treatment_effect_mean", empirical_coverage < 0.80)
+# Flag deviations on the primary estimand (treatment_effect_mean), then split
+# them into GENUINE issues vs deviations that are EXPECTED by design
+# (misspecification demos, boundary/degenerate setups, normalisation stress
+# tests). See scenario_expectations() in R/scenarios.R for the registry.
+mean_agg <- all_agg |> filter(parameter == "treatment_effect_mean")
 
-convergence_issues <- all_agg |>
-  filter(parameter == "treatment_effect_mean", pct_rhat_bad > 0.10)
+flagged <- bind_rows(
+  mean_agg |> filter(empirical_coverage < 0.80) |>
+    mutate(issue = "coverage < 80%"),
+  mean_agg |> filter(pct_rhat_bad > 0.10) |>
+    mutate(issue = ">10% of fits Rhat > 1.05")
+) |>
+  tag_expectations() |>
+  left_join(scenario_lookup(), by = "scenario_id")
+
+genuine  <- flagged |> filter(!expected)
+expected <- flagged |> filter(expected)
 ```
 
 **`r nrow(all_agg |> distinct(scenario_id))`** scenarios evaluated across
 **`r max(all_agg$n_reps, na.rm = TRUE)`** replications each.
 
-`r if (nrow(poor_coverage) == 0) "All scenarios achieved ≥80% empirical coverage for the treatment effect mean." else paste0(nrow(poor_coverage), " scenario(s) had coverage below 80% for the treatment effect mean.")`
+`r if (nrow(genuine) == 0) "**No genuine issues:** every deviation on the treatment-effect mean is expected by design (see below)." else paste0("**", nrow(genuine), " genuine issue(s)** on the treatment-effect mean need attention (below). A further ", nrow(expected), " flagged result(s) are expected by design.")`
 
-`r if (nrow(convergence_issues) == 0) "No convergence issues detected (all scenarios had <10% of fits with Rhat > 1.05)." else paste0(nrow(convergence_issues), " scenario(s) had >10% of fits with convergence warnings.")`
+### Genuine issues
 
-```{r poor-coverage-table}
-#| eval: !expr nrow(poor_coverage) > 0
+```{r genuine-issues-table}
+#| eval: !expr nrow(genuine) > 0
 kable(
-  poor_coverage |>
-    left_join(
-      tibble(
-        scenario_id = names(SCENARIO_CONFIGS),
-        description = purrr::map_chr(SCENARIO_CONFIGS, "description")
-      ),
-      by = "scenario_id"
-    ) |>
-    select(scenario_id, description, model_label, empirical_coverage, mean_bias, rmse),
+  genuine |>
+    select(scenario_id, description, model_label, issue,
+           empirical_coverage, mean_bias, rmse, pct_rhat_bad),
   digits = 3,
-  caption = "Scenarios with <80% coverage for treatment_effect_mean"
+  caption = "Genuine issues on treatment_effect_mean (coverage < 80% or convergence)"
 )
 ```
+
+`r if (nrow(genuine) == 0) "_None._" else ""`
+
+### Expected by design (not defects)
+
+These deviations are intended — misspecification demonstrations, boundary/degenerate
+setups, or deliberate normalisation stress tests — and are listed for completeness.
+
+```{r expected-issues-table}
+#| eval: !expr nrow(expected) > 0
+kable(
+  expected |>
+    select(scenario_id, description, model_label, issue,
+           empirical_coverage, mean_bias, reason),
+  digits = 3,
+  caption = "Expected-by-design deviations on treatment_effect_mean"
+)
+```
+
+`r if (nrow(expected) == 0) "_None._" else ""`
 
 ## A. Calibration Studies
 
@@ -248,7 +273,7 @@ results_table(all_agg, scenario_lookup_tbl, "G")
 
 Category I tests the multiplicative-covariate feature on the metadid `multiplicative-covars` branch: an estimated per-level factor (`effect_multiplier[<level>]`, with the reference level fixed at 1) applied to the population-mean linear predictor `treatment_effect_mean + X_cov · beta_cov`. Per-study heterogeneity is centred on the multiplied mean. The feature is useful when some study settings represent an attenuated or amplified version of the underlying effect (e.g. experimental vs real-world conditions, drug formulation, study source).
 
-Every I scenario pairs a modelled-mode fit (`normalise = TRUE`) with a raw-scale fit (`normalise = FALSE`) via the `compare` block so we can read the multiplier-recovery signal on both scales. I5 and I6 additionally pair with-multiplier vs without-multiplier fits to quantify the misspecification cost of omitting the feature when truth has it (I5) and the false-positive cost of including it spuriously when truth doesn't (I6). All scenarios use a bespoke simulator (`simulate_multiplicative_levels`) that draws per-study true effects from `θ_i ~ N(m_{level(i)} · (μ_θ + X_cov_i · β_cov), σ_θ²)`.
+Every I scenario pairs a modelled-mode fit (`normalise = TRUE`) with a raw-scale fit (`normalise = FALSE`) via the `compare` block so we can read the multiplier-recovery signal on both scales — the one exception is I7 (individual-level data), which runs the modelled arm only: on the raw scale the individual-data + multiplicative posterior fails to converge and hits max treedepth every iteration, so the arm was dropped (the raw multiplier signal is already covered by I1/I2/I8/I9). I5 and I6 additionally pair with-multiplier vs without-multiplier fits to quantify the misspecification cost of omitting the feature when truth has it (I5) and the false-positive cost of including it spuriously when truth doesn't (I6). All scenarios use a bespoke simulator (`simulate_multiplicative_levels`) that draws per-study true effects from `θ_i ~ N(m_{level(i)} · (μ_θ + X_cov_i · β_cov), σ_θ²)`.
 
 I8 and I9 exercise the two-covariate product extension (`multiplicative_covariate = ~ level + level2`): each study's overall factor is the product of two independently estimated per-covariate factors, labelled `effect_multiplier[<column>:<level>]` in the posterior. I8 crosses two binary covariates — one attenuating (0.6), one amplifying (1.4), so the amplifying direction is covered too — and I9 crosses a binary attenuator with a three-level covariate (0.7, 0.4), testing simultaneous recovery of three factors from a fully crossed design. The key diagnostics are per-factor coverage and the absence of leakage between the two factors (each multiplier should recover its own truth, not a blend of the product).
 
