@@ -1011,20 +1011,28 @@ scenario_expectations <- function() {
   tibble::tribble(
     ~scenario_id, ~model_label,       ~parameter,             ~reason,
     # --- Deliberate misspecification: a wrong/naive model fitted on purpose ---
+    "B1", "naive",            NA,                     "Naive arm zeros a large PP time trend — misspecified by design ('full should win')",
     "B3", "full",             NA,                     "Demonstrates pooled-trend failure when trends differ by design ('naive wins')",
     "B3", "naive",            NA,                     "Naive comparison arm — misspecified by design",
+    # RCT baseline imbalance is not per-study identifiable (one post obs per arm);
+    # the full model leans on the hierarchical prior informed by the few DiD
+    # studies, so under-coverage here is the demonstrated identification limit.
+    "B5", "full",             NA,                     "RCT baseline imbalance not per-study identifiable; full model relies on hierarchical borrowing from few DiD — under-coverage expected",
     "B5", "naive",            NA,                     "Naive arm ignores RCT baseline imbalance — biased by design",
+    "B6", "full",             NA,                     "Shared baseline-difference hierarchy is dominated by the larger DiD imbalance and mis-applies it to RCT — bias expected by design",
     "B6", "naive",            NA,                     "Naive arm ignores baseline imbalance — biased by design",
     "H1", "naive",            NA,                     "Naive arm — misspecified by design",
     "H2", "naive",            NA,                     "Naive arm — misspecified by design",
     "H3", "naive",            NA,                     "Naive arm — misspecified by design",
-    "H4", "naive",            NA,                     "Naive arm — misspecified by design",
+    "H4", NA,                 NA,                     "Trend confounded with study size and design (DiD small, PP large); the pooled-trend model cannot separate them — all arms biased by design",
     "C1", "normal",           NA,                     "Normal heterogeneity fitted to outlier-contaminated truth — inflation expected (robust arm is the calibrated one)",
     "C2", "normal",           NA,                     "Normal fit to heavy-tailed/contaminated truth — expected (see robust arm)",
     "C3", "normal",           NA,                     "Normal fit to heavy-tailed/contaminated truth — expected (see robust arm)",
     "C4", "normal",           NA,                     "Normal fit to heavy-tailed/contaminated truth — expected (see robust arm)",
     "C5", "normal",           NA,                     "Normal fit to heavy-tailed/contaminated truth — expected (see robust arm)",
-    "C6", "normal",           NA,                     "Normal fit to asymmetric contamination — expected (see robust arm)",
+    # Asymmetric (one-directional) contamination shifts the population mean even
+    # under robust heterogeneity, so BOTH arms are expected to fail here.
+    "C6", NA,                 NA,                     "One-directional contamination shifts the mean even under robust heterogeneity — both arms biased by design",
     "C7", "normal",           NA,                     "Normal fit to heavy-tailed/contaminated truth — expected (see robust arm)",
     "C8", "normal",           NA,                     "Normal fit to heavy-tailed/contaminated truth — expected (see robust arm)",
     "D4", NA,                 NA,                     "Effect correlated with sample size — informative-sampling misspecification demo",
