@@ -183,6 +183,12 @@ jobs:
 
       - name: Install CmdStan
         if: steps.cmdstan-cache.outputs.cache-hit != 'true'
+        # GITHUB_PAT authenticates cmdstanr's GitHub API call for the release
+        # list. Unauthenticated calls share a 60/hour per-IP limit across all
+        # tenants of the runner pool, which a cold-cache matrix run exhausts
+        # instantly (every job installs CmdStan concurrently).
+        env:
+          GITHUB_PAT: ${{ github.token }}
         run: Rscript -e 'cmdstanr::install_cmdstan(cores = 2)'
 
       - name: Install metadid from local checkout
@@ -271,6 +277,12 @@ jobs:
 
       - name: Install CmdStan
         if: steps.cmdstan-cache.outputs.cache-hit != 'true'
+        # GITHUB_PAT authenticates cmdstanr's GitHub API call for the release
+        # list. Unauthenticated calls share a 60/hour per-IP limit across all
+        # tenants of the runner pool, which a cold-cache matrix run exhausts
+        # instantly (every job installs CmdStan concurrently).
+        env:
+          GITHUB_PAT: ${{ github.token }}
         run: Rscript -e 'cmdstanr::install_cmdstan(cores = 2)'
 
       - name: Install metadid from local checkout
