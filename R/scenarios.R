@@ -1261,7 +1261,7 @@ SCENARIO_CONFIGS <- list(
       list(label = "naive", fn = "meta_did_general",
            time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
     )
-  )
+  ),
 
   N2 = scenario(
     "Figure panel F: exchangeability gap Delta = 0.025 (DiD trend -0.04, PP trend -0.065)",
@@ -1277,7 +1277,7 @@ SCENARIO_CONFIGS <- list(
       list(label = "naive", fn = "meta_did_general",
            time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
     )
-  )
+  ),
 
   N3 = scenario(
     "Figure panel F: exchangeability gap Delta = 0.05 (DiD trend -0.04, PP trend -0.09)",
@@ -1293,7 +1293,7 @@ SCENARIO_CONFIGS <- list(
       list(label = "naive", fn = "meta_did_general",
            time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
     )
-  )
+  ),
 
   N4 = scenario(
     "Figure panel F: exchangeability gap Delta = 0.075 (DiD trend -0.04, PP trend -0.115)",
@@ -1309,7 +1309,7 @@ SCENARIO_CONFIGS <- list(
       list(label = "naive", fn = "meta_did_general",
            time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
     )
-  )
+  ),
 
   N5 = scenario(
     "Figure panel F: exchangeability gap Delta = 0.1 (DiD trend -0.04, PP trend -0.14)",
@@ -1325,7 +1325,7 @@ SCENARIO_CONFIGS <- list(
       list(label = "naive", fn = "meta_did_general",
            time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
     )
-  )
+  ),
 
   N6 = scenario(
     "Figure panel F: exchangeability gap Delta = 0.125 (DiD trend -0.04, PP trend -0.165)",
@@ -1341,7 +1341,7 @@ SCENARIO_CONFIGS <- list(
       list(label = "naive", fn = "meta_did_general",
            time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
     )
-  )
+  ),
 
   N7 = scenario(
     "Figure panel F: exchangeability gap Delta = 0.15 (DiD trend -0.04, PP trend -0.19)",
