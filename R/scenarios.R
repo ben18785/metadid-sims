@@ -962,6 +962,401 @@ SCENARIO_CONFIGS <- list(
       list(label = "modelled", normalise = TRUE),
       list(label = "raw",      normalise = FALSE)
     )
+  ),
+
+  # ---------------------------------------------------------------------------
+  # Categories J-N: parameter sweeps for the paper's simulation figure.
+  #
+  #   J: trend-MEAN sweep (panel B)     - naive vs full bias as |mu_beta| grows
+  #   K: composition sweep (panel D)    - posterior SD as studies are added
+  #   L: contamination sweep (panel E)  - normal vs Student-t coverage
+  #   M: trend-VARIANCE sweep (panel C) - mu_beta = 0; naive miscalibrates
+  #   N: exchangeability sweep (panel F)- bias vs PP-DiD trend gap Delta
+  #
+  # These run at a reduced replication count (N_REPS_FIG in _targets.R)
+  # while the figure design settles; raise N_REPS_FIG for the final run.
+  # ---------------------------------------------------------------------------
+
+  J1 = scenario(
+    "Figure panel B: trend-mean sweep, true_trend = 0, 5 DiD + 25 PP",
+    dgp = list(n_did = 5L, n_pp = 25L, true_trend = 0, sigma_trend = 0.01),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general",
+           time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
+    )
+  ),
+
+  J2 = scenario(
+    "Figure panel B: trend-mean sweep, true_trend = -0.025, 5 DiD + 25 PP",
+    dgp = list(n_did = 5L, n_pp = 25L, true_trend = -0.025, sigma_trend = 0.01),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general",
+           time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
+    )
+  ),
+
+  J3 = scenario(
+    "Figure panel B: trend-mean sweep, true_trend = -0.05, 5 DiD + 25 PP",
+    dgp = list(n_did = 5L, n_pp = 25L, true_trend = -0.05, sigma_trend = 0.01),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general",
+           time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
+    )
+  ),
+
+  J4 = scenario(
+    "Figure panel B: trend-mean sweep, true_trend = -0.075, 5 DiD + 25 PP",
+    dgp = list(n_did = 5L, n_pp = 25L, true_trend = -0.075, sigma_trend = 0.01),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general",
+           time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
+    )
+  ),
+
+  J5 = scenario(
+    "Figure panel B: trend-mean sweep, true_trend = -0.1, 5 DiD + 25 PP",
+    dgp = list(n_did = 5L, n_pp = 25L, true_trend = -0.1, sigma_trend = 0.01),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general",
+           time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
+    )
+  ),
+
+  J6 = scenario(
+    "Figure panel B: trend-mean sweep, true_trend = -0.125, 5 DiD + 25 PP",
+    dgp = list(n_did = 5L, n_pp = 25L, true_trend = -0.125, sigma_trend = 0.01),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general",
+           time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
+    )
+  ),
+
+  J7 = scenario(
+    "Figure panel B: trend-mean sweep, true_trend = -0.15, 5 DiD + 25 PP",
+    dgp = list(n_did = 5L, n_pp = 25L, true_trend = -0.15, sigma_trend = 0.01),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general",
+           time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
+    )
+  ),
+
+  J8 = scenario(
+    "Figure panel B: trend-mean sweep, true_trend = -0.175, 5 DiD + 25 PP",
+    dgp = list(n_did = 5L, n_pp = 25L, true_trend = -0.175, sigma_trend = 0.01),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general",
+           time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
+    )
+  ),
+
+  J9 = scenario(
+    "Figure panel B: trend-mean sweep, true_trend = -0.2, 5 DiD + 25 PP",
+    dgp = list(n_did = 5L, n_pp = 25L, true_trend = -0.2, sigma_trend = 0.01),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general",
+           time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
+    )
+  ),
+
+  K1 = scenario(
+    "Figure panel D: 10 DiD + 0 RCT + 0 PP (0 incomplete studies added)",
+    dgp = list(n_did = 10L, n_rct = 0L, n_pp = 0L)
+  ),
+
+  K2 = scenario(
+    "Figure panel D: 10 DiD + 5 RCT + 5 PP (10 incomplete studies added)",
+    dgp = list(n_did = 10L, n_rct = 5L, n_pp = 5L)
+  ),
+
+  K3 = scenario(
+    "Figure panel D: 10 DiD + 10 RCT + 10 PP (20 incomplete studies added)",
+    dgp = list(n_did = 10L, n_rct = 10L, n_pp = 10L)
+  ),
+
+  K4 = scenario(
+    "Figure panel D: 10 DiD + 20 RCT + 20 PP (40 incomplete studies added)",
+    dgp = list(n_did = 10L, n_rct = 20L, n_pp = 20L)
+  ),
+
+  K5 = scenario(
+    "Figure panel D: 10 DiD + 40 RCT + 40 PP (80 incomplete studies added)",
+    dgp = list(n_did = 10L, n_rct = 40L, n_pp = 40L)
+  ),
+
+  K6 = scenario(
+    "Figure panel D reference: 20 DiD studies (10 DiD added to core of 10)",
+    dgp = list(n_did = 20L)
+  ),
+
+  K7 = scenario(
+    "Figure panel D reference: 30 DiD studies (20 DiD added to core of 10)",
+    dgp = list(n_did = 30L)
+  ),
+
+  K8 = scenario(
+    "Figure panel D reference: 50 DiD studies (40 DiD added to core of 10)",
+    dgp = list(n_did = 50L)
+  ),
+
+  K9 = scenario(
+    "Figure panel D reference: 90 DiD studies (80 DiD added to core of 10)",
+    dgp = list(n_did = 90L)
+  ),
+
+  L1 = scenario(
+    "Figure panel E: 0 of 20 studies outlying (5*sigma_effect shift)",
+    dgp = list(
+      type       = "bespoke",
+      bespoke_fn = "simulate_with_outliers",
+      n_did      = 20L,
+      n_outlier  = 0L,
+      outlier_shift = 5
+    ),
+    compare = list(
+      list(label = "normal", fn = "meta_did", robust_heterogeneity = FALSE),
+      list(label = "robust", fn = "meta_did", robust_heterogeneity = TRUE)
+    )
+  ),
+
+  L2 = scenario(
+    "Figure panel E: 1 of 20 studies outlying (5*sigma_effect shift)",
+    dgp = list(
+      type       = "bespoke",
+      bespoke_fn = "simulate_with_outliers",
+      n_did      = 20L,
+      n_outlier  = 1L,
+      outlier_shift = 5
+    ),
+    compare = list(
+      list(label = "normal", fn = "meta_did", robust_heterogeneity = FALSE),
+      list(label = "robust", fn = "meta_did", robust_heterogeneity = TRUE)
+    )
+  ),
+
+  L3 = scenario(
+    "Figure panel E: 3 of 20 studies outlying (5*sigma_effect shift)",
+    dgp = list(
+      type       = "bespoke",
+      bespoke_fn = "simulate_with_outliers",
+      n_did      = 20L,
+      n_outlier  = 3L,
+      outlier_shift = 5
+    ),
+    compare = list(
+      list(label = "normal", fn = "meta_did", robust_heterogeneity = FALSE),
+      list(label = "robust", fn = "meta_did", robust_heterogeneity = TRUE)
+    )
+  ),
+
+  L4 = scenario(
+    "Figure panel E: 5 of 20 studies outlying (5*sigma_effect shift)",
+    dgp = list(
+      type       = "bespoke",
+      bespoke_fn = "simulate_with_outliers",
+      n_did      = 20L,
+      n_outlier  = 5L,
+      outlier_shift = 5
+    ),
+    compare = list(
+      list(label = "normal", fn = "meta_did", robust_heterogeneity = FALSE),
+      list(label = "robust", fn = "meta_did", robust_heterogeneity = TRUE)
+    )
+  ),
+
+  L5 = scenario(
+    "Figure panel E: 7 of 20 studies outlying (5*sigma_effect shift)",
+    dgp = list(
+      type       = "bespoke",
+      bespoke_fn = "simulate_with_outliers",
+      n_did      = 20L,
+      n_outlier  = 7L,
+      outlier_shift = 5
+    ),
+    compare = list(
+      list(label = "normal", fn = "meta_did", robust_heterogeneity = FALSE),
+      list(label = "robust", fn = "meta_did", robust_heterogeneity = TRUE)
+    )
+  ),
+
+  M1 = scenario(
+    "Figure panel C: zero-mean trends, sigma_trend = 0, 15 DiD + 15 PP",
+    dgp = list(n_did = 15L, n_pp = 15L, true_trend = 0, sigma_trend = 0),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general",
+           time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
+    )
+  ),
+
+  M2 = scenario(
+    "Figure panel C: zero-mean trends, sigma_trend = 0.02, 15 DiD + 15 PP",
+    dgp = list(n_did = 15L, n_pp = 15L, true_trend = 0, sigma_trend = 0.02),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general",
+           time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
+    )
+  ),
+
+  M3 = scenario(
+    "Figure panel C: zero-mean trends, sigma_trend = 0.04, 15 DiD + 15 PP",
+    dgp = list(n_did = 15L, n_pp = 15L, true_trend = 0, sigma_trend = 0.04),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general",
+           time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
+    )
+  ),
+
+  M4 = scenario(
+    "Figure panel C: zero-mean trends, sigma_trend = 0.06, 15 DiD + 15 PP",
+    dgp = list(n_did = 15L, n_pp = 15L, true_trend = 0, sigma_trend = 0.06),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general",
+           time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
+    )
+  ),
+
+  M5 = scenario(
+    "Figure panel C: zero-mean trends, sigma_trend = 0.1, 15 DiD + 15 PP",
+    dgp = list(n_did = 15L, n_pp = 15L, true_trend = 0, sigma_trend = 0.1),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general",
+           time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
+    )
+  ),
+
+  M6 = scenario(
+    "Figure panel C: zero-mean trends, sigma_trend = 0.14, 15 DiD + 15 PP",
+    dgp = list(n_did = 15L, n_pp = 15L, true_trend = 0, sigma_trend = 0.14),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general",
+           time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
+    )
+  ),
+
+  N1 = scenario(
+    "Figure panel F: exchangeability gap Delta = 0 (DiD trend -0.04, PP trend -0.04)",
+    dgp = list(
+      type       = "bespoke",
+      bespoke_fn = "simulate_divergent_trends",
+      n_did = 10L, n_pp = 10L,
+      did_trend = -0.04, pp_trend = -0.04,
+      sigma_trend = 0.02
+    ),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general",
+           time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
+    )
+  )
+
+  N2 = scenario(
+    "Figure panel F: exchangeability gap Delta = 0.025 (DiD trend -0.04, PP trend -0.065)",
+    dgp = list(
+      type       = "bespoke",
+      bespoke_fn = "simulate_divergent_trends",
+      n_did = 10L, n_pp = 10L,
+      did_trend = -0.04, pp_trend = -0.065,
+      sigma_trend = 0.02
+    ),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general",
+           time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
+    )
+  )
+
+  N3 = scenario(
+    "Figure panel F: exchangeability gap Delta = 0.05 (DiD trend -0.04, PP trend -0.09)",
+    dgp = list(
+      type       = "bespoke",
+      bespoke_fn = "simulate_divergent_trends",
+      n_did = 10L, n_pp = 10L,
+      did_trend = -0.04, pp_trend = -0.09,
+      sigma_trend = 0.02
+    ),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general",
+           time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
+    )
+  )
+
+  N4 = scenario(
+    "Figure panel F: exchangeability gap Delta = 0.075 (DiD trend -0.04, PP trend -0.115)",
+    dgp = list(
+      type       = "bespoke",
+      bespoke_fn = "simulate_divergent_trends",
+      n_did = 10L, n_pp = 10L,
+      did_trend = -0.04, pp_trend = -0.115,
+      sigma_trend = 0.02
+    ),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general",
+           time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
+    )
+  )
+
+  N5 = scenario(
+    "Figure panel F: exchangeability gap Delta = 0.1 (DiD trend -0.04, PP trend -0.14)",
+    dgp = list(
+      type       = "bespoke",
+      bespoke_fn = "simulate_divergent_trends",
+      n_did = 10L, n_pp = 10L,
+      did_trend = -0.04, pp_trend = -0.14,
+      sigma_trend = 0.02
+    ),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general",
+           time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
+    )
+  )
+
+  N6 = scenario(
+    "Figure panel F: exchangeability gap Delta = 0.125 (DiD trend -0.04, PP trend -0.165)",
+    dgp = list(
+      type       = "bespoke",
+      bespoke_fn = "simulate_divergent_trends",
+      n_did = 10L, n_pp = 10L,
+      did_trend = -0.04, pp_trend = -0.165,
+      sigma_trend = 0.02
+    ),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general",
+           time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
+    )
+  )
+
+  N7 = scenario(
+    "Figure panel F: exchangeability gap Delta = 0.15 (DiD trend -0.04, PP trend -0.19)",
+    dgp = list(
+      type       = "bespoke",
+      bespoke_fn = "simulate_divergent_trends",
+      n_did = 10L, n_pp = 10L,
+      did_trend = -0.04, pp_trend = -0.19,
+      sigma_trend = 0.02
+    ),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general",
+           time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
+    )
   )
 )
 
@@ -1046,7 +1441,35 @@ scenario_expectations <- function() {
     # --- Deliberate normalisation (Jensen) stress tests ---
     "G8", NA,                 NA,                     "Jensen's test: large baseline_sd deliberately stresses the normalisation nonlinearity",
     "G9", NA,                 NA,                     "Jensen's test: high within-study precision deliberately stresses the normalisation nonlinearity"
-  )
+  ) |>
+    # --- Figure-sweep categories (J-N): arms misspecified by design ---
+    dplyr::bind_rows(
+      tibble::tibble(
+        scenario_id = scenario_ids("J"), model_label = "naive",
+        parameter = NA_character_,
+        reason = "Naive arm zeros the swept time trend - misspecified by design (figure panel B)"
+      ),
+      tibble::tibble(
+        scenario_id = scenario_ids("M"), model_label = "naive",
+        parameter = NA_character_,
+        reason = "Naive arm ignores swept zero-mean trend variability - miscalibration expected by design (figure panel C)"
+      ),
+      tibble::tibble(
+        scenario_id = scenario_ids("L"), model_label = "normal",
+        parameter = NA_character_,
+        reason = "Normal heterogeneity fitted to outlier-contaminated truth - expected (figure panel E; robust arm is the calibrated one)"
+      ),
+      tibble::tibble(
+        scenario_id = scenario_ids("N"), model_label = NA_character_,
+        parameter = NA_character_,
+        reason = "Trend exchangeability deliberately violated - bias expected in both arms, bounded for the full model (figure panel F)"
+      ),
+      tibble::tibble(
+        scenario_id = "M1", model_label = NA_character_,
+        parameter = c("time_trend_sd"),
+        reason = "Zero true trend heterogeneity (SD = 0 boundary) - a positive-constrained SD cannot cover it"
+      )
+    )
 }
 
 # Annotate a data frame of flagged results (must contain scenario_id,

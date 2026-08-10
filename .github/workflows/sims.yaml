@@ -2,7 +2,7 @@ name: simulations
 
 # Runs the metadid-sims targets pipeline once a day, but only if the
 # upstream `ben18785/metadid` repo has a new commit on `main` since the
-# last successful run. Each scenario category (A–H) runs in parallel as a
+# last successful run. Each scenario category (A–N) runs in parallel as a
 # separate matrix job; a final job merges their `_targets/` stores and
 # renders the Quarto validation report.
 #
@@ -109,8 +109,8 @@ jobs:
       - id: extract
         run: |
           set -euo pipefail
-          ids=$(grep -E '^  [A-I][0-9]+ = scenario\(' R/scenarios.R \
-                | sed -E 's/^  ([A-I][0-9]+) = .*/\1/')
+          ids=$(grep -E '^  [A-N][0-9]+ = scenario\(' R/scenarios.R \
+                | sed -E 's/^  ([A-N][0-9]+) = .*/\1/')
           if [ -z "$ids" ]; then
             echo "::error::No scenario IDs found in R/scenarios.R"
             exit 1
@@ -333,10 +333,11 @@ jobs:
               "scenario_lookup_tbl",
               "diag_plot_A", "diag_plot_B", "diag_plot_C", "diag_plot_D",
               "diag_plot_E", "diag_plot_F", "diag_plot_G", "diag_plot_H",
-              "diag_plot_I",
+              "diag_plot_I", "diag_plot_J", "diag_plot_K", "diag_plot_L",
+              "diag_plot_M", "diag_plot_N",
               "all_agg", "all_rep",
               "export_agg_csv", "export_rep_rds", "archive_results",
-              "scenario_settings_csv",
+              "scenario_settings_csv", "figure_data_csv",
               "report"
             ))
           '
@@ -351,6 +352,7 @@ jobs:
             metadid-sims/output/replication_results.rds
             metadid-sims/output/archive.csv
             metadid-sims/output/scenario_settings.csv
+            metadid-sims/output/figure_panels.csv
           if-no-files-found: warn
           retention-days: 90
 
@@ -377,6 +379,7 @@ jobs:
           cp metadid-sims/output/aggregated_results.csv   "public/archive/${NEW_DIR}/" 2>/dev/null || true
           cp metadid-sims/output/replication_results.rds  "public/archive/${NEW_DIR}/" 2>/dev/null || true
           cp metadid-sims/output/scenario_settings.csv    "public/archive/${NEW_DIR}/" 2>/dev/null || true
+          cp metadid-sims/output/figure_panels.csv        "public/archive/${NEW_DIR}/" 2>/dev/null || true
 
           # --- "latest/" always points at the newest report ---
           mkdir -p public/latest
@@ -384,6 +387,7 @@ jobs:
           cp metadid-sims/output/aggregated_results.csv   public/latest/ 2>/dev/null || true
           cp metadid-sims/output/replication_results.rds  public/latest/ 2>/dev/null || true
           cp metadid-sims/output/scenario_settings.csv    public/latest/ 2>/dev/null || true
+          cp metadid-sims/output/figure_panels.csv        public/latest/ 2>/dev/null || true
 
           # --- Cross-run files at the site root (overwritten each run) ---
           cp metadid-sims/output/archive.csv           public/archive.csv          2>/dev/null || true

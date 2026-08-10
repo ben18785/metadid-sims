@@ -50,6 +50,10 @@ N_REPS <- 25L
 # downstream targets are unchanged.
 N_REPS_INDIV <- 15L
 
+# Figure-sweep categories (J-N) run at a deliberately small replication
+# count while the paper figure design settles. Raise for the final run.
+N_REPS_FIG <- 5L
+
 # ---------------------------------------------------------------------------
 # Source R files
 # ---------------------------------------------------------------------------
@@ -371,6 +375,62 @@ list(
   tar_target(I_rep, dplyr::bind_rows(I_rep_main, I_rep_indiv)),
   tar_target(I_agg, aggregate_scenario(I_rep)),
 
+  # ---- Category J: figure sweep (panel B; reduced reps) ----
+  tarchetypes::tar_map_rep(
+    name    = J_rep,
+    command = run_one_rep(scenario_id, config, targets::tar_seed_get(), metadid_src),
+    values  = scenario_values(scenario_ids("J")),
+    names   = tidyselect::any_of("scenario_id"),
+    batches = N_REPS_FIG,
+    reps    = 1
+  ),
+  tar_target(J_agg, aggregate_scenario(J_rep)),
+
+  # ---- Category K: figure sweep (panel D; reduced reps) ----
+  tarchetypes::tar_map_rep(
+    name    = K_rep,
+    command = run_one_rep(scenario_id, config, targets::tar_seed_get(), metadid_src),
+    values  = scenario_values(scenario_ids("K")),
+    names   = tidyselect::any_of("scenario_id"),
+    batches = N_REPS_FIG,
+    reps    = 1
+  ),
+  tar_target(K_agg, aggregate_scenario(K_rep)),
+
+  # ---- Category L: figure sweep (panel E; reduced reps) ----
+  tarchetypes::tar_map_rep(
+    name    = L_rep,
+    command = run_one_rep(scenario_id, config, targets::tar_seed_get(), metadid_src),
+    values  = scenario_values(scenario_ids("L")),
+    names   = tidyselect::any_of("scenario_id"),
+    batches = N_REPS_FIG,
+    reps    = 1
+  ),
+  tar_target(L_agg, aggregate_scenario(L_rep)),
+
+  # ---- Category M: figure sweep (panel C; reduced reps) ----
+  tarchetypes::tar_map_rep(
+    name    = M_rep,
+    command = run_one_rep(scenario_id, config, targets::tar_seed_get(), metadid_src),
+    values  = scenario_values(scenario_ids("M")),
+    names   = tidyselect::any_of("scenario_id"),
+    batches = N_REPS_FIG,
+    reps    = 1
+  ),
+  tar_target(M_agg, aggregate_scenario(M_rep)),
+
+  # ---- Category N: figure sweep (panel F; reduced reps) ----
+  tarchetypes::tar_map_rep(
+    name    = N_rep,
+    command = run_one_rep(scenario_id, config, targets::tar_seed_get(), metadid_src),
+    values  = scenario_values(scenario_ids("N")),
+    names   = tidyselect::any_of("scenario_id"),
+    batches = N_REPS_FIG,
+    reps    = 1
+  ),
+  tar_target(N_agg, aggregate_scenario(N_rep)),
+
+
   # ---- Scenario lookup table ----
   tar_target(scenario_lookup_tbl, scenario_lookup()),
 
@@ -397,16 +457,23 @@ list(
   tar_target(diag_plot_G, plot_diagnostics(G_rep,  G_agg,  scenario_lookup_tbl, "G")),
   tar_target(diag_plot_H, plot_diagnostics(H_rep,  H_agg,  scenario_lookup_tbl, "H")),
   tar_target(diag_plot_I, plot_diagnostics(I_rep,  I_agg,  scenario_lookup_tbl, "I")),
+  tar_target(diag_plot_J, plot_diagnostics(J_rep,  J_agg,  scenario_lookup_tbl, "J")),
+  tar_target(diag_plot_K, plot_diagnostics(K_rep,  K_agg,  scenario_lookup_tbl, "K")),
+  tar_target(diag_plot_L, plot_diagnostics(L_rep,  L_agg,  scenario_lookup_tbl, "L")),
+  tar_target(diag_plot_M, plot_diagnostics(M_rep,  M_agg,  scenario_lookup_tbl, "M")),
+  tar_target(diag_plot_N, plot_diagnostics(N_rep,  N_agg,  scenario_lookup_tbl, "N")),
 
   # ---- Combined results ----
   tar_target(
     all_agg,
-    dplyr::bind_rows(A_agg, F_agg, B_agg, C_agg, D_agg, E_agg, G_agg, H_agg, I_agg)
+    dplyr::bind_rows(A_agg, F_agg, B_agg, C_agg, D_agg, E_agg, G_agg, H_agg,
+                     I_agg, J_agg, K_agg, L_agg, M_agg, N_agg)
   ),
 
   tar_target(
     all_rep,
-    dplyr::bind_rows(A_rep, F_rep, B_rep, C_rep, D_rep, E_rep, G_rep, H_rep, I_rep)
+    dplyr::bind_rows(A_rep, F_rep, B_rep, C_rep, D_rep, E_rep, G_rep, H_rep,
+                     I_rep, J_rep, K_rep, L_rep, M_rep, N_rep)
   ),
 
   # ---- Machine-readable exports ----
@@ -473,6 +540,29 @@ list(
       dir.create("output", showWarnings = FALSE)
       saveRDS(all_rep, "output/replication_results.rds")
       "output/replication_results.rds"
+    },
+    format = "file"
+  ),
+
+  # ---- Figure-panel data export ----
+  # One tidy CSV with the treatment_effect_mean rows that feed the paper's
+  # six-panel simulation figure (panel A from the existing A/F calibration
+  # scenarios; panels B-F from the J-N sweeps).
+  tar_target(
+    figure_data_csv,
+    {
+      dir.create("output", showWarnings = FALSE)
+      panels <- dplyr::bind_rows(
+        dplyr::mutate(dplyr::bind_rows(A_agg, F_agg), panel = "A"),
+        dplyr::mutate(J_agg, panel = "B"),
+        dplyr::mutate(M_agg, panel = "C"),
+        dplyr::mutate(K_agg, panel = "D"),
+        dplyr::mutate(L_agg, panel = "E"),
+        dplyr::mutate(N_agg, panel = "F")
+      ) |>
+        dplyr::filter(parameter == "treatment_effect_mean")
+      readr::write_csv(panels, "output/figure_panels.csv")
+      "output/figure_panels.csv"
     },
     format = "file"
   ),
