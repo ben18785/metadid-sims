@@ -267,8 +267,11 @@ jobs:
             paired <- tar_read(paired_contrasts)
             readr::write_csv(paired, "output/paired_contrasts.csv")
 
-            # Rendering is deliberately a single call into R/plots.R so that a
-            # local render from the same CSVs cannot drift from CI's.
+            # Rendering is deliberately a single call into R/plots.R so that
+            # a local render from the same CSVs cannot drift from the CI one.
+            # NB: no apostrophes anywhere in this block -- it is inside a
+            # single-quoted shell string, so one would terminate it early and
+            # bash would try to parse the remaining R code.
             render_paper_figures("output")
           '
 
