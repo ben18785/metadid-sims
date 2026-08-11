@@ -509,7 +509,14 @@ list(
   tar_target(S_agg, aggregate_scenario(S_rep)),
 
   # ---- One-dataset illustration (Figure 1, column 1) ----
-  tar_target(illustration_draws, run_illustration(495L, metadid_src)),
+  # Arguments NAMED deliberately: `pkg` exists only to create a dependency
+  # edge on the metadid source, and a positional call put it in whichever
+  # parameter happened to be second -- which broke when run_illustration()
+  # gained n_studies/sigma_effect.
+  tar_target(
+    illustration_draws,
+    run_illustration(seed = 495L, pkg = metadid_src)
+  ),
   tar_target(
     illustration_csv,
     {

@@ -19,7 +19,14 @@ library(metadid)
 
 run_illustration <- function(seed = 495L, n_studies = 20L,
                              sigma_effect = 0.08, pkg = NULL) {
-  stopifnot(n_studies %% 2L == 0L)
+  # `pkg` is a dependency-tracking sentinel, not data. Check the type first so
+  # a mis-bound positional argument fails with a message that names the cause.
+  stopifnot(
+    "n_studies must be a single even number" =
+      is.numeric(n_studies) && length(n_studies) == 1L && n_studies %% 2 == 0,
+    "sigma_effect must be a single number" =
+      is.numeric(sigma_effect) && length(sigma_effect) == 1L
+  )
   half <- n_studies %/% 2L
   dgp <- list(
     n_studies     = n_studies,
