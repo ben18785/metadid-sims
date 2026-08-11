@@ -350,8 +350,22 @@ plot_divergences <- function(agg_results) {
 
 .fig_model_cols <- c(
   full        = "#0072B2", naive = "#D55E00",
-  normal      = "#0072B2", robust = "#009E73"
+  normal      = "#0072B2", robust = "#009E73",
+  # `homog` is the middle rung of the M-category nested ladder (mu_beta free,
+  # sigma_beta pinned at ~0). Shares a hue with `robust`, but the two never
+  # appear in the same panel.
+  homog       = "#009E73"
 )
+
+# Diverging fill for signed bias surfaces (panels K/L). Deliberately NOT the
+# categorical model hues: here colour encodes sign and magnitude, not identity.
+.fig_bias_fill <- function(limit) {
+  ggplot2::scale_fill_gradient2(
+    low = "#2166AC", mid = "#F7F7F7", high = "#B2182B", midpoint = 0,
+    limits = c(-limit, limit),
+    name = expression("Bias in " * mu[theta])
+  )
+}
 
 #' Multi-panel paper figure from aggregated results
 #'
@@ -526,5 +540,73 @@ plot_paper_figure <- function(all_agg) {
                   y = expression("Bias in " * mu[theta])) +
     .fig_theme()
 
-  patchwork::wrap_plots(gA, gB, gC, gD, gE, gF, gG, gH, ncol = 2)
+  # --- I: cost of the unnecessary variance component (M) ------------------
+  # Same sweep as panel C, but on interval width. mu_beta = 0 throughout, so
+  # all three arms are unbiased and this is a pure efficiency comparison --
+  # RMSE would barely register it. Read the left edge (sigma_beta = 0, the
+  # truth has no trend at all): the naive -> homog gap is the cost of allowing
+  # a trend level, the homog -> hier gap is the cost of falsely allowing
+  # trend variability.
+  pi_ <- sweep_data("M", function(d, id) d$sigma_trend / 0.02)
+  gI <- ggplot2::ggplot(pi_, ggplot2::aes(x, mean_ci_width,
+                                          colour = model_label)) +
+    ggplot2::geom_point(size = 1.6) +
+    ggplot2::geom_line(linewidth = 0.5) +
+    ggplot2::scale_colour_manual(values = .fig_model_cols) +
+    ggplot2::expand_limits(y = 0) +
+    ggplot2::labs(title = "I  Cost of allowing trend variability (M)",
+                  x = expression(tau[beta] * " (multiples of default), " *
+                                   mu[beta] * " = 0"),
+                  y = expression("Mean 90% CrI width for " * mu[theta])) +
+    .fig_theme()
+
+  # --- J: DiD studies needed to buy back the premium (R) ------------------
+  pj <- sweep_data("R", function(d, id) d$n_did)
+  gJ <- ggplot2::ggplot(pj, ggplot2::aes(x, mean_ci_width,
+                                         colour = model_label)) +
+    ggplot2::geom_point(size = 1.6) +
+    ggplot2::geom_line(linewidth = 0.5) +
+    ggplot2::scale_colour_manual(values = .fig_model_cols) +
+    ggplot2::expand_limits(y = 0) +
+    ggplot2::labs(title = "J  Pure null: premium vs DiD studies (R)",
+                  x = "DiD studies (20 PP throughout)",
+                  y = expression("Mean 90% CrI width for " * mu[theta])) +
+    .fig_theme()
+
+  # --- K/L: bias over the trend plane (Q) ---------------------------------
+  # Each model is unbiased only on its own line: the full model along the
+  # diagonal pp = did, the naive model along the horizontal pp = 0. The N and
+  # O sweeps are a single vertical slice of this plane at did = -0.04.
+  q_ids <- scenario_ids("Q")
+  q_xy <- purrr::map_dfr(q_ids, function(id) {
+    d <- SCENARIO_CONFIGS[[id]]$dgp
+    tibble::tibble(scenario_id = id,
+                   x = d$did_trend / .fig_base(id),
+                   y = d$pp_trend  / .fig_base(id))
+  })
+  pq <- te |>
+    dplyr::filter(scenario_id %in% q_ids) |>
+    dplyr::left_join(q_xy, by = "scenario_id")
+  q_lim <- max(abs(pq$mean_bias), na.rm = TRUE)
+
+  .plane <- function(arm, ttl, slope) {
+    ggplot2::ggplot(dplyr::filter(pq, model_label == arm),
+                    ggplot2::aes(x, y, fill = mean_bias)) +
+      ggplot2::geom_tile(colour = "white", linewidth = 0.4) +
+      ggplot2::geom_abline(slope = slope, intercept = 0,
+                           colour = "#111111", linewidth = 0.7) +
+      .fig_bias_fill(q_lim) +
+      ggplot2::coord_fixed() +
+      ggplot2::labs(title = ttl,
+                    x = expression(mu[beta]^{DiD} * " (normalised)"),
+                    y = expression(mu[beta]^{PP} * " (normalised)")) +
+      .fig_theme() +
+      ggplot2::theme(panel.grid = ggplot2::element_blank(),
+                     legend.position = "right")
+  }
+  gK <- .plane("full",  "K  Trend plane: full model bias (Q)",  1)
+  gL <- .plane("naive", "L  Trend plane: naive model bias (Q)", 0)
+
+  patchwork::wrap_plots(gA, gB, gC, gD, gE, gF, gG, gH, gI, gJ, gK, gL,
+                        ncol = 2)
 }

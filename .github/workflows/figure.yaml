@@ -40,7 +40,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        category: [J, K, L, M, N, O, P]
+        category: [J, K, L, M, N, O, P, Q, R]
     env:
       N_REPS_FIG: ${{ inputs.reps }}
     steps:
@@ -216,7 +216,7 @@ jobs:
 
             # Build the sweep aggregates (cached from the category jobs).
             tar_make(names = c("J_agg", "K_agg", "L_agg", "M_agg",
-                               "N_agg", "O_agg", "P_agg"))
+                               "N_agg", "O_agg", "P_agg", "Q_agg", "R_agg"))
 
             tar_source("R/scenarios.R")
             tar_source("R/plots.R")
@@ -228,7 +228,9 @@ jobs:
               mutate(tar_read(L_agg), panel = "E"),
               mutate(tar_read(N_agg), panel = "F"),
               mutate(tar_read(O_agg), panel = "G"),
-              mutate(tar_read(P_agg), panel = "H")
+              mutate(tar_read(P_agg), panel = "H"),
+              mutate(tar_read(R_agg), panel = "J"),
+              mutate(tar_read(Q_agg), panel = "KL")
             )
 
             # Panel A rows from the latest published full run (if available).
@@ -247,10 +249,11 @@ jobs:
               readr::write_csv("output/figure_panels.csv")
 
             fig <- plot_paper_figure(all_agg)
+            # 12 panels at ncol = 2 -> 6 rows.
             ggplot2::ggsave("output/paper_figure.png", fig,
-                            width = 11, height = 18, dpi = 300)
+                            width = 11, height = 27, dpi = 300, limitsize = FALSE)
             ggplot2::ggsave("output/paper_figure.pdf", fig,
-                            width = 11, height = 18)
+                            width = 11, height = 27, limitsize = FALSE)
           '
 
       - name: Upload figure artifacts

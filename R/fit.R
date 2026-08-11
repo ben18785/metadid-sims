@@ -51,6 +51,14 @@ fit_scenario <- function(sim_result, fit_config) {
     MCMC_OPTS
   )
 
+  # Custom priors, when a scenario (or a compare arm) supplies them. Used by
+  # the M-category `homog` arm, which pins time_trend_sd at ~0 to emulate a
+  # homogeneous-trend model — metadid's `time_trend` switch only offers
+  # "pooled" and "fixed_zero", so there is no built-in sigma_beta = 0 option.
+  if (!is.null(fit_config$priors)) {
+    args$priors <- fit_config$priors
+  }
+
   # Add covariates if specified
   if (!is.null(fit_config$covariates)) {
     args$covariates <- fit_config$covariates

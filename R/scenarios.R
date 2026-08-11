@@ -1679,6 +1679,104 @@ scenario_ids <- function(prefix) {
   sort(ids)
 }
 
+# ---------------------------------------------------------------------------
+# Category M: third, nested arm (figure panels C and I)
+#
+# M already sweeps the right axis for the "cost of an unnecessary variance
+# component" question: mu_beta = 0 throughout, only sigma_beta varies. What it
+# lacked was the middle rung of the nested ladder:
+#
+#   naive  mu_beta = 0,    sigma_beta = 0     0 free trend parameters
+#   homog  mu_beta free,   sigma_beta = 0     1
+#   hier   mu_beta free,   sigma_beta free    2   (the existing "full" arm)
+#
+# At sigma_beta = 0 the truth has no trend at all, so `naive` is exactly
+# correct and each extra parameter has a price that can be read off directly:
+# naive -> homog is the cost of allowing a trend level, homog -> hier is the
+# cost of falsely allowing trend VARIABILITY. The old full-vs-naive contrast
+# jumps both rungs at once and so can never separate them.
+#
+# metadid's `time_trend` switch offers only "pooled" and "fixed_zero", so there
+# is no built-in sigma_beta = 0 model; we emulate one by pinning the
+# time_trend_sd prior at ~0 (default is cauchy(5), i.e. very heavy-tailed).
+# ---------------------------------------------------------------------------
+for (.id in grep("^M\\d", names(SCENARIO_CONFIGS), value = TRUE)) {
+  SCENARIO_CONFIGS[[.id]]$compare <- c(
+    SCENARIO_CONFIGS[[.id]]$compare,
+    list(list(
+      label  = "homog",
+      fn     = "meta_did",
+      priors = metadid::set_priors(
+        time_trend_sd = metadid::normal(0, 0.001)
+      )
+    ))
+  )
+}
+rm(.id)
+
+# ---------------------------------------------------------------------------
+# Category Q: trend-plane grid (figure panels K and L)
+#
+# Every N and O scenario fixes did_trend = -0.04, so the whole published
+# exchangeability evidence base is a single vertical line in the
+# (did_trend, pp_trend) plane. Q fills the plane on a symmetric grid, which
+# lets the geometry be measured rather than extrapolated: the full model
+# should be unbiased along the DIAGONAL pp = did (it borrows the DiD trend, so
+# it is right whenever that trend transfers, at any magnitude), and the naive
+# model along the HORIZONTAL pp = 0. Any departure from that -- e.g. bias
+# depending on the absolute trend level and not only on the difference -- is
+# itself the finding.
+# ---------------------------------------------------------------------------
+Q_GRID <- expand.grid(
+  did_trend = c(-0.12, -0.06, 0, 0.06, 0.12),
+  pp_trend  = c(-0.12, -0.06, 0, 0.06, 0.12)
+)
+
+for (.i in seq_len(nrow(Q_GRID))) {
+  .did <- Q_GRID$did_trend[.i]
+  .pp  <- Q_GRID$pp_trend[.i]
+  SCENARIO_CONFIGS[[paste0("Q", .i)]] <- scenario(
+    sprintf("Figure panels K/L: trend plane, DiD trend %s, PP trend %s",
+            .did, .pp),
+    dgp = list(
+      type       = "bespoke",
+      bespoke_fn = "simulate_divergent_trends",
+      n_did = 10L, n_pp = 10L,
+      did_trend = .did, pp_trend = .pp,
+      sigma_trend = 0.02
+    ),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general",
+           time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
+    )
+  )
+}
+rm(.i, .did, .pp)
+
+# ---------------------------------------------------------------------------
+# Category R: how many DiD studies buy back the premium (figure panel J)
+#
+# The pure null -- mu_beta = 0 AND sigma_beta = 0, so there is no trend at all
+# and the naive model is exactly correct. Sweeping the number of DiD studies
+# with n_pp held fixed shows how the full model's interval premium decays as
+# more studies anchor the trend it insists on estimating. Note total N grows
+# along the sweep, so both models tighten; the full/naive RATIO is the part
+# that controls for that.
+# ---------------------------------------------------------------------------
+for (.n in c(2L, 5L, 10L, 15L, 20L, 30L)) {
+  SCENARIO_CONFIGS[[paste0("R", .n)]] <- scenario(
+    sprintf("Figure panel J: pure null (no trend), %d DiD + 20 PP", .n),
+    dgp = list(n_did = .n, n_pp = 20L, true_trend = 0, sigma_trend = 0),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general",
+           time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
+    )
+  )
+}
+rm(.n)
+
 # TRUE if a scenario fits any individual-level data — either directly
 # (fit$data_format) or via a compare arm. Individual-data fits are markedly
 # slower, so the pipeline runs them at a reduced replication count.

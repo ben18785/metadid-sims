@@ -454,7 +454,27 @@ list(
   ),
   tar_target(P_agg, aggregate_scenario(P_rep)),
 
+  # ---- Category Q: trend-plane grid (panels K/L; reduced reps) ----
+  tarchetypes::tar_map_rep(
+    name    = Q_rep,
+    command = run_one_rep(scenario_id, config, targets::tar_seed_get(), metadid_src),
+    values  = scenario_values(scenario_ids("Q")),
+    names   = tidyselect::any_of("scenario_id"),
+    batches = N_REPS_FIG,
+    reps    = 1
+  ),
+  tar_target(Q_agg, aggregate_scenario(Q_rep)),
 
+  # ---- Category R: DiD-count sweep at the pure null (panel J) ----
+  tarchetypes::tar_map_rep(
+    name    = R_rep,
+    command = run_one_rep(scenario_id, config, targets::tar_seed_get(), metadid_src),
+    values  = scenario_values(scenario_ids("R")),
+    names   = tidyselect::any_of("scenario_id"),
+    batches = N_REPS_FIG,
+    reps    = 1
+  ),
+  tar_target(R_agg, aggregate_scenario(R_rep)),
 
   # ---- Scenario lookup table ----
   tar_target(scenario_lookup_tbl, scenario_lookup()),
