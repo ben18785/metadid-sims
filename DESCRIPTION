@@ -23,6 +23,7 @@ Imports:
     knitr,
     MASS,
     mvtnorm,
+    patchwork,
     purrr,
     quarto,
     readr,

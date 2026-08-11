@@ -1,0 +1,265 @@
+name: paper-figure
+
+# Runs ONLY the paper-figure sweep categories (J-P) and exports
+# output/figure_panels.csv plus a rendered figure. Panel A's calibration
+# rows are pulled from the latest published full run on gh-pages rather
+# than recomputed, so this workflow stays fast (~30-60 min) and is safe
+# to iterate on without touching the daily simulations pipeline.
+#
+# Trigger manually from the Actions tab. "reps" sets the replication
+# count for the sweep categories (default 5; use 25-100+ for the
+# camera-ready figure).
+
+on:
+  workflow_dispatch:
+    inputs:
+      reps:
+        description: "Replications per figure scenario (N_REPS_FIG)"
+        type: number
+        default: 5
+
+concurrency:
+  group: paper-figure
+  cancel-in-progress: false
+
+env:
+  PKGCACHE_HTTP_RETRIES: "5"
+  PKGCACHE_HTTP_DELAY: "3"
+
+jobs:
+
+  # ---------------------------------------------------------------------------
+  # simulate: one job per figure category. At low reps each category is
+  # minutes of fitting, so per-category jobs amortise the ~5-10 min of
+  # R/CmdStan/metadid setup far better than per-scenario jobs would.
+  # ---------------------------------------------------------------------------
+  simulate:
+    name: "Category ${{ matrix.category }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        category: [J, K, L, M, N, O, P]
+    env:
+      N_REPS_FIG: ${{ inputs.reps }}
+    steps:
+      - name: Checkout metadid-sims
+        uses: actions/checkout@v4
+        with:
+          path: metadid-sims
+
+      - name: Checkout metadid (current main)
+        uses: actions/checkout@v4
+        with:
+          repository: ben18785/metadid
+          ref: main
+          path: metadid
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+          extra-repositories: "https://mc-stan.org/r-packages/"
+
+      - uses: r-lib/actions/setup-pandoc@v2
+
+      # tarchetypes::tar_quarto() in _targets.R probes the Quarto CLI at
+      # pipeline-construction time, so tar_make() needs the binary even
+      # though this workflow never renders the report.
+      - uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: Install R package dependencies
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          working-directory: metadid-sims
+          cache-version: 3
+
+      - name: Cache CmdStan
+        id: cmdstan-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cmdstan
+          key: cmdstan-${{ runner.os }}-v1
+
+      - name: Install CmdStan
+        if: steps.cmdstan-cache.outputs.cache-hit != 'true'
+        env:
+          GITHUB_PAT: ${{ github.token }}
+        run: Rscript -e 'cmdstanr::install_cmdstan(cores = 2)'
+
+      - name: Install metadid from local checkout
+        run: R CMD INSTALL ./metadid
+
+      - name: Run targets for category ${{ matrix.category }}
+        working-directory: metadid-sims
+        run: |
+          Rscript -e '
+            library(targets)
+            tar_make(
+              names = tidyselect::starts_with("${{ matrix.category }}_")
+            )
+          '
+
+      - name: Upload _targets store slice
+        uses: actions/upload-artifact@v4
+        with:
+          name: figure-store-${{ matrix.category }}
+          path: |
+            metadid-sims/_targets/meta/
+            metadid-sims/_targets/objects/
+          if-no-files-found: error
+          retention-days: 14
+
+  # ---------------------------------------------------------------------------
+  # assemble: merge category stores, build figure_panels.csv, fetch the
+  # A/F calibration rows from the latest published full run, render the
+  # eight-panel figure, and upload everything as artifacts.
+  # ---------------------------------------------------------------------------
+  assemble:
+    name: Assemble figure
+    needs: simulate
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      N_REPS_FIG: ${{ inputs.reps }}
+    steps:
+      - name: Checkout metadid-sims
+        uses: actions/checkout@v4
+        with:
+          path: metadid-sims
+
+      - name: Checkout metadid (current main)
+        uses: actions/checkout@v4
+        with:
+          repository: ben18785/metadid
+          ref: main
+          path: metadid
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+          extra-repositories: "https://mc-stan.org/r-packages/"
+
+      - uses: r-lib/actions/setup-pandoc@v2
+
+      - uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: Install R package dependencies
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          working-directory: metadid-sims
+          cache-version: 3
+
+      - name: Cache CmdStan
+        id: cmdstan-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cmdstan
+          key: cmdstan-${{ runner.os }}-v1
+
+      - name: Install CmdStan
+        if: steps.cmdstan-cache.outputs.cache-hit != 'true'
+        env:
+          GITHUB_PAT: ${{ github.token }}
+        run: Rscript -e 'cmdstanr::install_cmdstan(cores = 2)'
+
+      - name: Install metadid from local checkout
+        run: R CMD INSTALL ./metadid
+
+      - name: Download category store slices
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: figure-store-*
+
+      - name: Merge _targets stores
+        working-directory: metadid-sims
+        run: |
+          set -euo pipefail
+          mkdir -p _targets/meta _targets/objects
+          for d in ../artifacts/figure-store-*; do
+            if [ -d "$d/objects" ]; then
+              cp -rn "$d"/objects/. _targets/objects/ || true
+            fi
+          done
+          first=$(ls -1 ../artifacts/figure-store-*/meta/meta 2>/dev/null | head -1)
+          if [ -z "$first" ]; then
+            echo "::error::No meta files found in downloaded artifacts"
+            exit 1
+          fi
+          head -n 1 "$first" > _targets/meta/meta
+          for f in ../artifacts/figure-store-*/meta/meta; do
+            tail -n +2 "$f"
+          done | awk -F'|' '!seen[$1]++' >> _targets/meta/meta
+          echo "Merged $(wc -l < _targets/meta/meta) meta rows, $(ls _targets/objects | wc -l) objects."
+
+      - name: Fetch A/F calibration rows from latest full run
+        working-directory: metadid-sims
+        run: |
+          set -euo pipefail
+          mkdir -p output
+          url="https://raw.githubusercontent.com/${{ github.repository }}/gh-pages/latest/aggregated_results.csv"
+          if curl -fsSL -o output/latest_full_agg.csv "$url"; then
+            echo "Fetched latest full-run aggregates ($(wc -l < output/latest_full_agg.csv) rows)"
+          else
+            echo "::warning::No published full run found; panel A will be empty"
+            rm -f output/latest_full_agg.csv
+          fi
+
+      - name: Build figure data and render figure
+        working-directory: metadid-sims
+        run: |
+          Rscript -e '
+            library(targets)
+            library(dplyr)
+
+            # Build the sweep aggregates (cached from the category jobs).
+            tar_make(names = c("J_agg", "K_agg", "L_agg", "M_agg",
+                               "N_agg", "O_agg", "P_agg"))
+
+            tar_source("R/scenarios.R")
+            tar_source("R/plots.R")
+
+            sweeps <- bind_rows(
+              mutate(tar_read(J_agg), panel = "B"),
+              mutate(tar_read(M_agg), panel = "C"),
+              mutate(tar_read(K_agg), panel = "D"),
+              mutate(tar_read(L_agg), panel = "E"),
+              mutate(tar_read(N_agg), panel = "F"),
+              mutate(tar_read(O_agg), panel = "G"),
+              mutate(tar_read(P_agg), panel = "H")
+            )
+
+            # Panel A rows from the latest published full run (if available).
+            af <- NULL
+            if (file.exists("output/latest_full_agg.csv")) {
+              af <- readr::read_csv("output/latest_full_agg.csv",
+                                    show_col_types = FALSE) |>
+                filter(grepl("^[AF][0-9]", scenario_id)) |>
+                mutate(panel = "A")
+            }
+            all_agg <- bind_rows(af, sweeps)
+
+            dir.create("output", showWarnings = FALSE)
+            all_agg |>
+              filter(parameter == "treatment_effect_mean") |>
+              readr::write_csv("output/figure_panels.csv")
+
+            fig <- plot_paper_figure(all_agg)
+            ggplot2::ggsave("output/paper_figure.png", fig,
+                            width = 11, height = 18, dpi = 300)
+            ggplot2::ggsave("output/paper_figure.pdf", fig,
+                            width = 11, height = 18)
+          '
+
+      - name: Upload figure artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: paper-figure
+          path: |
+            metadid-sims/output/figure_panels.csv
+            metadid-sims/output/paper_figure.png
+            metadid-sims/output/paper_figure.pdf
+          if-no-files-found: error
+          retention-days: 90

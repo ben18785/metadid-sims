@@ -321,3 +321,210 @@ plot_divergences <- function(agg_results) {
   gridExtra::grid.arrange(p_mean, p_pct, nrow = 2,
                            top = "Sampler divergences by scenario")
 }
+
+
+# ===========================================================================
+# Paper figure (categories A/F calibration + J-P sweeps)
+# ===========================================================================
+#
+# Builds the multi-panel simulation figure for the paper from aggregated
+# results. Sweep x-values are derived from SCENARIO_CONFIGS so the figure
+# stays correct if the grids change. All effect-scale quantities are on the
+# baseline-normalised scale (raw sweep values divided by the DGP
+# baseline_mean).
+
+.fig_base <- function(sid) {
+  b <- SCENARIO_CONFIGS[[sid]]$dgp$baseline_mean
+  if (is.null(b)) 0.45 else b
+}
+
+.fig_theme <- function() {
+  ggplot2::theme_minimal(base_size = 10) +
+    ggplot2::theme(
+      legend.position  = "bottom",
+      legend.title     = ggplot2::element_blank(),
+      panel.grid.minor = ggplot2::element_blank(),
+      plot.title       = ggplot2::element_text(face = "bold", size = 10)
+    )
+}
+
+.fig_model_cols <- c(
+  full        = "#0072B2", naive = "#D55E00",
+  normal      = "#0072B2", robust = "#009E73"
+)
+
+#' Multi-panel paper figure from aggregated results
+#'
+#' @param all_agg Aggregated results tibble (scenario x model x parameter).
+#' @return A patchwork object (8 panels, 4 x 2).
+plot_paper_figure <- function(all_agg) {
+  te <- all_agg |> dplyr::filter(parameter == "treatment_effect_mean")
+
+  # --- A: calibration coverage across A and F scenarios -------------------
+  pa <- te |>
+    dplyr::filter(grepl("^[AF][0-9]", scenario_id)) |>
+    dplyr::mutate(
+      se = sqrt(pmax(empirical_coverage * (1 - empirical_coverage), 1e-9) / n_reps),
+      lo = pmax(empirical_coverage - 1.96 * se, 0),
+      hi = pmin(empirical_coverage + 1.96 * se, 1),
+      scenario_id = factor(
+        scenario_id,
+        levels = stringr::str_sort(unique(scenario_id), numeric = TRUE)
+      )
+    )
+  band <- 1.96 * sqrt(0.9 * 0.1 / max(pa$n_reps, na.rm = TRUE))
+  gA <- ggplot2::ggplot(pa, ggplot2::aes(scenario_id, empirical_coverage)) +
+    ggplot2::annotate("rect", xmin = -Inf, xmax = Inf,
+                      ymin = 0.9 - band, ymax = min(0.9 + band, 1),
+                      alpha = 0.15) +
+    ggplot2::geom_hline(yintercept = 0.9, linetype = "dashed") +
+    ggplot2::geom_pointrange(ggplot2::aes(ymin = lo, ymax = hi),
+                             colour = "#0072B2", size = 0.2) +
+    ggplot2::labs(title = "A  Calibration (A/F scenarios)",
+                  x = NULL, y = "Coverage of 90% CrI") +
+    .fig_theme() +
+    ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90, size = 5.5,
+                                                       vjust = 0.5))
+
+  # --- helper: sweep panel of a summary statistic vs a DGP-derived x ------
+  sweep_data <- function(prefix, xfun) {
+    ids <- scenario_ids(prefix)
+    xv <- purrr::map_dbl(ids, function(id) xfun(SCENARIO_CONFIGS[[id]]$dgp, id))
+    te |>
+      dplyr::filter(scenario_id %in% ids) |>
+      dplyr::left_join(tibble::tibble(scenario_id = ids, x = xv),
+                       by = "scenario_id")
+  }
+
+  # --- B: trend-mean sweep (J) --------------------------------------------
+  pb <- sweep_data("J", function(d, id) abs(d$true_trend) / .fig_base(id))
+  gB <- ggplot2::ggplot(pb, ggplot2::aes(x, mean_bias, colour = model_label)) +
+    ggplot2::geom_hline(yintercept = 0, linetype = "dashed") +
+    ggplot2::geom_point(size = 1.6) +
+    ggplot2::geom_line(linewidth = 0.4, alpha = 0.7) +
+    ggplot2::scale_colour_manual(values = .fig_model_cols) +
+    ggplot2::labs(title = "B  Systematic trends: bias (J)",
+                  x = expression("True trend magnitude " * "|" * mu[beta] * "|" *
+                                   " (normalised)"),
+                  y = expression("Bias in " * mu[theta])) +
+    .fig_theme()
+
+  # --- C: trend-variability sweep at zero mean (M) ------------------------
+  pc <- sweep_data("M", function(d, id) d$sigma_trend / 0.02) |>
+    dplyr::mutate(
+      se = sqrt(pmax(empirical_coverage * (1 - empirical_coverage), 1e-9) / n_reps),
+      lo = pmax(empirical_coverage - 1.96 * se, 0),
+      hi = pmin(empirical_coverage + 1.96 * se, 1)
+    )
+  gC <- ggplot2::ggplot(pc, ggplot2::aes(x, empirical_coverage,
+                                         colour = model_label)) +
+    ggplot2::geom_hline(yintercept = 0.9, linetype = "dashed") +
+    ggplot2::geom_pointrange(ggplot2::aes(ymin = lo, ymax = hi), size = 0.25,
+                             position = ggplot2::position_dodge(width = 0.25)) +
+    ggplot2::scale_colour_manual(values = .fig_model_cols) +
+    ggplot2::labs(title = "C  Variable trends, zero mean: coverage (M)",
+                  x = expression(tau[beta] * " (multiples of default), " *
+                                   mu[beta] * " = 0"),
+                  y = "Coverage of 90% CrI") +
+    .fig_theme()
+
+  # --- D: information from incomplete designs (K) -------------------------
+  k_ids <- scenario_ids("K")
+  k_info <- purrr::map_dfr(k_ids, function(id) {
+    d <- SCENARIO_CONFIGS[[id]]$dgp
+    tibble::tibble(
+      scenario_id = id,
+      added = (d$n_did - 10L) + d$n_rct + d$n_pp,
+      curve = dplyr::case_when(
+        d$n_rct > 0 & d$n_pp > 0 ~ "RCT + PP",
+        d$n_rct > 0              ~ "RCT only",
+        d$n_pp  > 0              ~ "PP only",
+        d$n_did > 10L            ~ "DiD (reference)",
+        TRUE                     ~ "core"
+      )
+    )
+  })
+  curves <- setdiff(unique(k_info$curve), "core")
+  k_core <- k_info |> dplyr::filter(curve == "core")
+  k_all <- dplyr::bind_rows(
+    k_info |> dplyr::filter(curve != "core"),
+    tidyr::crossing(k_core |> dplyr::select(-curve), curve = curves)
+  )
+  pd <- te |>
+    dplyr::filter(scenario_id %in% k_ids) |>
+    dplyr::inner_join(k_all, by = "scenario_id",
+                      relationship = "many-to-many")
+  gD <- ggplot2::ggplot(pd, ggplot2::aes(added, mean_posterior_sd,
+                                         colour = curve, linetype = curve)) +
+    ggplot2::geom_point(size = 1.6) +
+    ggplot2::geom_line(linewidth = 0.5) +
+    ggplot2::scale_colour_manual(values = c(
+      "RCT + PP" = "#0072B2", "RCT only" = "#009E73",
+      "PP only" = "#CC79A7", "DiD (reference)" = "#6b6b6b")) +
+    ggplot2::scale_linetype_manual(values = c(
+      "RCT + PP" = "solid", "RCT only" = "solid",
+      "PP only" = "solid", "DiD (reference)" = "dashed")) +
+    ggplot2::labs(title = "D  Information from incomplete designs (K)",
+                  x = "Studies added to a core of 10 DiD",
+                  y = expression("Posterior SD of " * mu[theta])) +
+    ggplot2::expand_limits(y = 0) +
+    .fig_theme()
+
+  # --- E: outlier contamination (L) ---------------------------------------
+  pe <- sweep_data("L", function(d, id) 100 * d$n_outlier / d$n_did)
+  gE <- ggplot2::ggplot(pe, ggplot2::aes(x, rmse, colour = model_label)) +
+    ggplot2::geom_point(size = 1.6) +
+    ggplot2::geom_line(linewidth = 0.5) +
+    ggplot2::scale_colour_manual(values = .fig_model_cols) +
+    ggplot2::labs(title = "E  Outlying studies: RMSE (L)",
+                  x = "Outlying studies (%)",
+                  y = expression("RMSE of " * mu[theta])) +
+    ggplot2::expand_limits(y = 0) +
+    .fig_theme()
+
+  # --- F: exchangeability gap sweep (N) -----------------------------------
+  pf <- sweep_data("N", function(d, id) (d$did_trend - d$pp_trend) / .fig_base(id))
+  gF <- ggplot2::ggplot(pf, ggplot2::aes(x, mean_bias, colour = model_label)) +
+    ggplot2::geom_hline(yintercept = 0, linetype = "dashed") +
+    ggplot2::geom_point(size = 1.6) +
+    ggplot2::geom_smooth(method = "lm", se = FALSE, linewidth = 0.5,
+                         linetype = "dotted", formula = y ~ x) +
+    ggplot2::scale_colour_manual(values = .fig_model_cols) +
+    ggplot2::labs(title = "F  Exchangeability violations (N)",
+                  x = expression("PP vs DiD trend difference " * Delta *
+                                   " (normalised)"),
+                  y = expression("Bias in " * mu[theta])) +
+    .fig_theme()
+
+  # --- G: crossover sweep (O) ---------------------------------------------
+  pg <- sweep_data("O", function(d, id) d$pp_trend / .fig_base(id))
+  x_did <- SCENARIO_CONFIGS[["O1"]]$dgp$did_trend / .fig_base("O1")
+  gG <- ggplot2::ggplot(pg, ggplot2::aes(x, mean_bias, colour = model_label)) +
+    ggplot2::geom_hline(yintercept = 0, linetype = "dashed") +
+    ggplot2::geom_vline(xintercept = x_did, linetype = "dotdash",
+                        colour = "#6b6b6b") +
+    ggplot2::geom_point(size = 1.6) +
+    ggplot2::geom_smooth(method = "lm", se = FALSE, linewidth = 0.5,
+                         linetype = "dotted", formula = y ~ x) +
+    ggplot2::scale_colour_manual(values = .fig_model_cols) +
+    ggplot2::labs(title = "G  Trend crossover: when borrowing hurts (O)",
+                  x = expression("True PP trend " * mu[beta]^{PP} *
+                                   " (normalised); vline = DiD trend"),
+                  y = expression("Bias in " * mu[theta])) +
+    .fig_theme()
+
+  # --- H: RCT baseline-imbalance sweep (P) --------------------------------
+  ph <- sweep_data("P", function(d, id) d$rct_gamma_mean / .fig_base(id))
+  gH <- ggplot2::ggplot(ph, ggplot2::aes(x, mean_bias, colour = model_label)) +
+    ggplot2::geom_hline(yintercept = 0, linetype = "dashed") +
+    ggplot2::geom_point(size = 1.6) +
+    ggplot2::geom_smooth(method = "lm", se = FALSE, linewidth = 0.5,
+                         linetype = "dotted", formula = y ~ x) +
+    ggplot2::scale_colour_manual(values = .fig_model_cols) +
+    ggplot2::labs(title = "H  RCT baseline imbalance (P)",
+                  x = expression("RCT imbalance " * mu[gamma] * " (normalised)"),
+                  y = expression("Bias in " * mu[theta])) +
+    .fig_theme()
+
+  patchwork::wrap_plots(gA, gB, gC, gD, gE, gF, gG, gH, ncol = 2)
+}

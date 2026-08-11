@@ -50,9 +50,11 @@ N_REPS <- 25L
 # downstream targets are unchanged.
 N_REPS_INDIV <- 15L
 
-# Figure-sweep categories (J-N) run at a deliberately small replication
-# count while the paper figure design settles. Raise for the final run.
-N_REPS_FIG <- 5L
+# Figure-sweep categories (J-P) run at a deliberately small replication
+# count while the paper figure design settles. Overridable via the
+# N_REPS_FIG environment variable (used by the figure.yaml workflow's
+# reps input); raise for the final run.
+N_REPS_FIG <- as.integer(Sys.getenv("N_REPS_FIG", "5"))
 
 # ---------------------------------------------------------------------------
 # Source R files
@@ -430,6 +432,29 @@ list(
   ),
   tar_target(N_agg, aggregate_scenario(N_rep)),
 
+  # ---- Category O: figure sweep (panel G; reduced reps) ----
+  tarchetypes::tar_map_rep(
+    name    = O_rep,
+    command = run_one_rep(scenario_id, config, targets::tar_seed_get(), metadid_src),
+    values  = scenario_values(scenario_ids("O")),
+    names   = tidyselect::any_of("scenario_id"),
+    batches = N_REPS_FIG,
+    reps    = 1
+  ),
+  tar_target(O_agg, aggregate_scenario(O_rep)),
+
+  # ---- Category P: figure sweep (panel H; reduced reps) ----
+  tarchetypes::tar_map_rep(
+    name    = P_rep,
+    command = run_one_rep(scenario_id, config, targets::tar_seed_get(), metadid_src),
+    values  = scenario_values(scenario_ids("P")),
+    names   = tidyselect::any_of("scenario_id"),
+    batches = N_REPS_FIG,
+    reps    = 1
+  ),
+  tar_target(P_agg, aggregate_scenario(P_rep)),
+
+
 
   # ---- Scenario lookup table ----
   tar_target(scenario_lookup_tbl, scenario_lookup()),
@@ -462,18 +487,20 @@ list(
   tar_target(diag_plot_L, plot_diagnostics(L_rep,  L_agg,  scenario_lookup_tbl, "L")),
   tar_target(diag_plot_M, plot_diagnostics(M_rep,  M_agg,  scenario_lookup_tbl, "M")),
   tar_target(diag_plot_N, plot_diagnostics(N_rep,  N_agg,  scenario_lookup_tbl, "N")),
+  tar_target(diag_plot_O, plot_diagnostics(O_rep,  O_agg,  scenario_lookup_tbl, "O")),
+  tar_target(diag_plot_P, plot_diagnostics(P_rep,  P_agg,  scenario_lookup_tbl, "P")),
 
   # ---- Combined results ----
   tar_target(
     all_agg,
     dplyr::bind_rows(A_agg, F_agg, B_agg, C_agg, D_agg, E_agg, G_agg, H_agg,
-                     I_agg, J_agg, K_agg, L_agg, M_agg, N_agg)
+                     I_agg, J_agg, K_agg, L_agg, M_agg, N_agg, O_agg, P_agg)
   ),
 
   tar_target(
     all_rep,
     dplyr::bind_rows(A_rep, F_rep, B_rep, C_rep, D_rep, E_rep, G_rep, H_rep,
-                     I_rep, J_rep, K_rep, L_rep, M_rep, N_rep)
+                     I_rep, J_rep, K_rep, L_rep, M_rep, N_rep, O_rep, P_rep)
   ),
 
   # ---- Machine-readable exports ----
@@ -558,7 +585,9 @@ list(
         dplyr::mutate(M_agg, panel = "C"),
         dplyr::mutate(K_agg, panel = "D"),
         dplyr::mutate(L_agg, panel = "E"),
-        dplyr::mutate(N_agg, panel = "F")
+        dplyr::mutate(N_agg, panel = "F"),
+        dplyr::mutate(O_agg, panel = "G"),
+        dplyr::mutate(P_agg, panel = "H")
       ) |>
         dplyr::filter(parameter == "treatment_effect_mean")
       readr::write_csv(panels, "output/figure_panels.csv")

@@ -1112,6 +1112,46 @@ SCENARIO_CONFIGS <- list(
     dgp = list(n_did = 90L)
   ),
 
+  K10 = scenario(
+    "Figure panel D split: 10 DiD + 10 RCT only (10 added)",
+    dgp = list(n_did = 10L, n_rct = 10L, n_pp = 0L)
+  ),
+
+  K11 = scenario(
+    "Figure panel D split: 10 DiD + 20 RCT only (20 added)",
+    dgp = list(n_did = 10L, n_rct = 20L, n_pp = 0L)
+  ),
+
+  K12 = scenario(
+    "Figure panel D split: 10 DiD + 40 RCT only (40 added)",
+    dgp = list(n_did = 10L, n_rct = 40L, n_pp = 0L)
+  ),
+
+  K13 = scenario(
+    "Figure panel D split: 10 DiD + 80 RCT only (80 added)",
+    dgp = list(n_did = 10L, n_rct = 80L, n_pp = 0L)
+  ),
+
+  K14 = scenario(
+    "Figure panel D split: 10 DiD + 10 PP only (10 added)",
+    dgp = list(n_did = 10L, n_rct = 0L, n_pp = 10L)
+  ),
+
+  K15 = scenario(
+    "Figure panel D split: 10 DiD + 20 PP only (20 added)",
+    dgp = list(n_did = 10L, n_rct = 0L, n_pp = 20L)
+  ),
+
+  K16 = scenario(
+    "Figure panel D split: 10 DiD + 40 PP only (40 added)",
+    dgp = list(n_did = 10L, n_rct = 0L, n_pp = 40L)
+  ),
+
+  K17 = scenario(
+    "Figure panel D split: 10 DiD + 80 PP only (80 added)",
+    dgp = list(n_did = 10L, n_rct = 0L, n_pp = 80L)
+  ),
+
   L1 = scenario(
     "Figure panel E: 0 of 20 studies outlying (5*sigma_effect shift)",
     dgp = list(
@@ -1357,6 +1397,276 @@ SCENARIO_CONFIGS <- list(
       list(label = "naive", fn = "meta_did_general",
            time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
     )
+  ),
+
+  # ---------------------------------------------------------------------------
+  # Category O: trend crossover sweep (figure panel G).
+  # DiD trend fixed at -0.04; PP trend swept THROUGH it. Full model unbiased
+  # only at exchangeability (pp = did); naive unbiased only at pp = 0.
+  # ---------------------------------------------------------------------------
+
+  O1 = scenario(
+    "Figure panel G: crossover, DiD trend -0.04, PP trend -0.2",
+    dgp = list(
+      type       = "bespoke",
+      bespoke_fn = "simulate_divergent_trends",
+      n_did = 10L, n_pp = 10L,
+      did_trend = -0.04, pp_trend = -0.2,
+      sigma_trend = 0.02
+    ),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general",
+           time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
+    )
+  ),
+
+  O2 = scenario(
+    "Figure panel G: crossover, DiD trend -0.04, PP trend -0.15",
+    dgp = list(
+      type       = "bespoke",
+      bespoke_fn = "simulate_divergent_trends",
+      n_did = 10L, n_pp = 10L,
+      did_trend = -0.04, pp_trend = -0.15,
+      sigma_trend = 0.02
+    ),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general",
+           time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
+    )
+  ),
+
+  O3 = scenario(
+    "Figure panel G: crossover, DiD trend -0.04, PP trend -0.1",
+    dgp = list(
+      type       = "bespoke",
+      bespoke_fn = "simulate_divergent_trends",
+      n_did = 10L, n_pp = 10L,
+      did_trend = -0.04, pp_trend = -0.1,
+      sigma_trend = 0.02
+    ),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general",
+           time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
+    )
+  ),
+
+  O4 = scenario(
+    "Figure panel G: crossover, DiD trend -0.04, PP trend -0.07",
+    dgp = list(
+      type       = "bespoke",
+      bespoke_fn = "simulate_divergent_trends",
+      n_did = 10L, n_pp = 10L,
+      did_trend = -0.04, pp_trend = -0.07,
+      sigma_trend = 0.02
+    ),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general",
+           time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
+    )
+  ),
+
+  O5 = scenario(
+    "Figure panel G: crossover, DiD trend -0.04, PP trend -0.04",
+    dgp = list(
+      type       = "bespoke",
+      bespoke_fn = "simulate_divergent_trends",
+      n_did = 10L, n_pp = 10L,
+      did_trend = -0.04, pp_trend = -0.04,
+      sigma_trend = 0.02
+    ),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general",
+           time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
+    )
+  ),
+
+  O6 = scenario(
+    "Figure panel G: crossover, DiD trend -0.04, PP trend -0.02",
+    dgp = list(
+      type       = "bespoke",
+      bespoke_fn = "simulate_divergent_trends",
+      n_did = 10L, n_pp = 10L,
+      did_trend = -0.04, pp_trend = -0.02,
+      sigma_trend = 0.02
+    ),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general",
+           time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
+    )
+  ),
+
+  O7 = scenario(
+    "Figure panel G: crossover, DiD trend -0.04, PP trend 0",
+    dgp = list(
+      type       = "bespoke",
+      bespoke_fn = "simulate_divergent_trends",
+      n_did = 10L, n_pp = 10L,
+      did_trend = -0.04, pp_trend = 0,
+      sigma_trend = 0.02
+    ),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general",
+           time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
+    )
+  ),
+
+  O8 = scenario(
+    "Figure panel G: crossover, DiD trend -0.04, PP trend 0.04",
+    dgp = list(
+      type       = "bespoke",
+      bespoke_fn = "simulate_divergent_trends",
+      n_did = 10L, n_pp = 10L,
+      did_trend = -0.04, pp_trend = 0.04,
+      sigma_trend = 0.02
+    ),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general",
+           time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
+    )
+  ),
+
+  O9 = scenario(
+    "Figure panel G: crossover, DiD trend -0.04, PP trend 0.08",
+    dgp = list(
+      type       = "bespoke",
+      bespoke_fn = "simulate_divergent_trends",
+      n_did = 10L, n_pp = 10L,
+      did_trend = -0.04, pp_trend = 0.08,
+      sigma_trend = 0.02
+    ),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general",
+           time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
+    )
+  ),
+
+  # ---------------------------------------------------------------------------
+  # Category P: RCT baseline-imbalance sweep (figure panel H).
+  # The gamma analogue of the panel-B trend sweep: naive (gamma = 0) bias
+  # grows at the RCT weight W_R; estimating imbalance with DiD borrowing
+  # reduces (but does not remove) the slope - imbalance is only partially
+  # identified from post-only data (cf. B5/B6).
+  # ---------------------------------------------------------------------------
+
+  P1 = scenario(
+    "Figure panel H: RCT baseline imbalance, gamma mean 0",
+    dgp = list(
+      type           = "bespoke",
+      bespoke_fn     = "simulate_rct_imbalance",
+      n_did          = 10L,
+      n_rct          = 20L,
+      rct_gamma_mean = 0,
+      rct_gamma_sd   = 0.02
+    ),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general", baseline_imbalance = "fixed_zero")
+    )
+  ),
+
+  P2 = scenario(
+    "Figure panel H: RCT baseline imbalance, gamma mean 0.02",
+    dgp = list(
+      type           = "bespoke",
+      bespoke_fn     = "simulate_rct_imbalance",
+      n_did          = 10L,
+      n_rct          = 20L,
+      rct_gamma_mean = 0.02,
+      rct_gamma_sd   = 0.02
+    ),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general", baseline_imbalance = "fixed_zero")
+    )
+  ),
+
+  P3 = scenario(
+    "Figure panel H: RCT baseline imbalance, gamma mean 0.04",
+    dgp = list(
+      type           = "bespoke",
+      bespoke_fn     = "simulate_rct_imbalance",
+      n_did          = 10L,
+      n_rct          = 20L,
+      rct_gamma_mean = 0.04,
+      rct_gamma_sd   = 0.02
+    ),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general", baseline_imbalance = "fixed_zero")
+    )
+  ),
+
+  P4 = scenario(
+    "Figure panel H: RCT baseline imbalance, gamma mean 0.05",
+    dgp = list(
+      type           = "bespoke",
+      bespoke_fn     = "simulate_rct_imbalance",
+      n_did          = 10L,
+      n_rct          = 20L,
+      rct_gamma_mean = 0.05,
+      rct_gamma_sd   = 0.02
+    ),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general", baseline_imbalance = "fixed_zero")
+    )
+  ),
+
+  P5 = scenario(
+    "Figure panel H: RCT baseline imbalance, gamma mean 0.06",
+    dgp = list(
+      type           = "bespoke",
+      bespoke_fn     = "simulate_rct_imbalance",
+      n_did          = 10L,
+      n_rct          = 20L,
+      rct_gamma_mean = 0.06,
+      rct_gamma_sd   = 0.02
+    ),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general", baseline_imbalance = "fixed_zero")
+    )
+  ),
+
+  P6 = scenario(
+    "Figure panel H: RCT baseline imbalance, gamma mean 0.08",
+    dgp = list(
+      type           = "bespoke",
+      bespoke_fn     = "simulate_rct_imbalance",
+      n_did          = 10L,
+      n_rct          = 20L,
+      rct_gamma_mean = 0.08,
+      rct_gamma_sd   = 0.02
+    ),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general", baseline_imbalance = "fixed_zero")
+    )
+  ),
+
+  P7 = scenario(
+    "Figure panel H: RCT baseline imbalance, gamma mean 0.1",
+    dgp = list(
+      type           = "bespoke",
+      bespoke_fn     = "simulate_rct_imbalance",
+      n_did          = 10L,
+      n_rct          = 20L,
+      rct_gamma_mean = 0.1,
+      rct_gamma_sd   = 0.02
+    ),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general", baseline_imbalance = "fixed_zero")
+    )
   )
 )
 
@@ -1463,6 +1773,16 @@ scenario_expectations <- function() {
         scenario_id = scenario_ids("N"), model_label = NA_character_,
         parameter = NA_character_,
         reason = "Trend exchangeability deliberately violated - bias expected in both arms, bounded for the full model (figure panel F)"
+      ),
+      tibble::tibble(
+        scenario_id = scenario_ids("O"), model_label = NA_character_,
+        parameter = NA_character_,
+        reason = "Crossover sweep deliberately violates trend exchangeability on both sides of the matched point (figure panel G)"
+      ),
+      tibble::tibble(
+        scenario_id = scenario_ids("P"), model_label = NA_character_,
+        parameter = NA_character_,
+        reason = "RCT imbalance sweep: naive arm misspecified by design; full arm only partially identifies imbalance (figure panel H)"
       ),
       tibble::tibble(
         scenario_id = "M1", model_label = NA_character_,
