@@ -384,7 +384,7 @@ plot_divergences <- function(agg_results) {
 #' the pipeline:  paper_panels(readr::read_csv("figure_panels.csv"))$I
 #' Panels whose category is absent from `all_agg` come back empty rather than
 #' erroring, so a partial CSV still lets you inspect the panels it does cover.
-paper_panels <- function(all_agg) {
+paper_panels <- function(all_agg, paired = NULL) {
   te <- all_agg |> dplyr::filter(parameter == "treatment_effect_mean")
 
   # --- A: calibration coverage across A and F scenarios -------------------
@@ -399,7 +399,11 @@ paper_panels <- function(all_agg) {
         levels = stringr::str_sort(unique(scenario_id), numeric = TRUE)
       )
     )
-  band <- 1.96 * sqrt(0.9 * 0.1 / max(pa$n_reps, na.rm = TRUE))
+  # A/F rows are absent from the figure workflow (calibration is a nightly
+  # concern), so guard the empty case rather than warning on every build.
+  band <- if (nrow(pa)) {
+    1.96 * sqrt(0.9 * 0.1 / max(pa$n_reps, na.rm = TRUE))
+  } else NA_real_
   gA <- ggplot2::ggplot(pa, ggplot2::aes(scenario_id, empirical_coverage)) +
     ggplot2::annotate("rect", xmin = -Inf, xmax = Inf,
                       ymin = 0.9 - band, ymax = min(0.9 + band, 1),
@@ -461,16 +465,21 @@ paper_panels <- function(all_agg) {
     d <- SCENARIO_CONFIGS[[id]]$dgp
     tibble::tibble(
       scenario_id = id,
-      added = (d$n_did - 10L) + d$n_rct + d$n_pp,
+      added = (d$n_did - K_CORE) + d$n_rct + d$n_pp,
       curve = dplyr::case_when(
         d$n_rct > 0 & d$n_pp > 0 ~ "RCT + PP",
         d$n_rct > 0              ~ "RCT only",
         d$n_pp  > 0              ~ "PP only",
-        d$n_did > 10L            ~ "DiD (reference)",
+        d$n_did > K_CORE         ~ "DiD (reference)",
         TRUE                     ~ "core"
       )
     )
   })
+  # Only the mixed RCT+PP sweep against the DiD reference, matching the S
+  # panel so the two are read side by side. The RCT-only and PP-only arms are
+  # still simulated and remain available for the SI.
+  k_info <- dplyr::filter(k_info,
+                          curve %in% c("RCT + PP", "DiD (reference)", "core"))
   curves <- setdiff(unique(k_info$curve), "core")
   k_core <- k_info |> dplyr::filter(curve == "core")
   k_all <- dplyr::bind_rows(
@@ -491,8 +500,8 @@ paper_panels <- function(all_agg) {
     ggplot2::scale_linetype_manual(values = c(
       "RCT + PP" = "solid", "RCT only" = "solid",
       "PP only" = "solid", "DiD (reference)" = "dashed")) +
-    ggplot2::labs(title = "E  Information from incomplete designs (K)",
-                  x = "Studies added to a core of 10 DiD",
+    ggplot2::labs(title = "E  Adding incomplete designs to a small DiD core (K)",
+                  x = sprintf("Studies added to a core of %d DiD", K_CORE),
                   y = expression("Posterior SD of " * mu[theta])) +
     ggplot2::expand_limits(y = 0) +
     .fig_theme()
@@ -504,16 +513,48 @@ paper_panels <- function(all_agg) {
   # much more sharply than interval width shows it (naive/full RMSE reaches
   # ~5x on this sweep vs ~1.5x on width). Ignoring genuine between-study
   # trend variation propagates that variation straight into mu_theta.
-  pi_ <- sweep_data("M", function(d, id) d$sigma_trend / 0.02)
-  gI <- ggplot2::ggplot(pi_, ggplot2::aes(x, rmse, colour = model_label)) +
-    ggplot2::geom_point(size = 1.6) +
+  # Full/naive RMSE ratio, paired per replicate where `paired` is supplied
+  # (see paired_rmse_ratio()); otherwise falls back to the ratio of separately
+  # aggregated RMSEs so a bare figure_panels.csv still renders locally.
+  # Two lines: M is 15 DiD + 15 PP, T is 5 DiD + 25 PP. The more the evidence
+  # base leans on PP studies, the earlier ignoring trend variation costs you.
+  f_ids <- c(scenario_ids("M"), scenario_ids("T"))
+  f_meta <- purrr::map_dfr(f_ids, function(id) {
+    d <- SCENARIO_CONFIGS[[id]]$dgp
+    tibble::tibble(scenario_id = id,
+                   x = d$sigma_trend / 0.02,
+                   composition = sprintf("%d DiD + %d PP", d$n_did, d$n_pp))
+  })
+  pi_ <- if (!is.null(paired) && nrow(paired)) {
+    paired |> dplyr::inner_join(f_meta, by = "scenario_id")
+  } else {
+    w <- te |>
+      dplyr::filter(scenario_id %in% f_ids,
+                    model_label %in% c("full", "naive")) |>
+      dplyr::select(scenario_id, model_label, rmse) |>
+      tidyr::pivot_wider(names_from = model_label, values_from = rmse)
+    if (.has_arms(w)) {
+      w |>
+        dplyr::mutate(ratio = full / naive, lo = NA_real_, hi = NA_real_) |>
+        dplyr::inner_join(f_meta, by = "scenario_id")
+    } else {
+      tibble::tibble(x = numeric(), ratio = numeric(), lo = numeric(),
+                     hi = numeric(), composition = character())
+    }
+  }
+  gI <- ggplot2::ggplot(pi_, ggplot2::aes(x, ratio, colour = composition)) +
+    ggplot2::geom_hline(yintercept = 1, linetype = "dashed",
+                        colour = "#6b6b6b") +
+    ggplot2::geom_ribbon(ggplot2::aes(ymin = lo, ymax = hi, fill = composition),
+                         alpha = 0.15, colour = NA, na.rm = TRUE) +
     ggplot2::geom_line(linewidth = 0.5) +
-    ggplot2::scale_colour_manual(values = .fig_model_cols) +
-    ggplot2::expand_limits(y = 0) +
-    ggplot2::labs(title = "D  Variable trends, zero mean: RMSE (M)",
+    ggplot2::geom_point(size = 1.6) +
+    ggplot2::scale_colour_manual(values = c("#0072B2", "#CC79A7"),
+                                 name = NULL, aesthetics = c("colour", "fill")) +
+    ggplot2::labs(title = "D  Variable trends, zero mean: RMSE ratio (M, T)",
                   x = expression(tau[beta] * " (multiples of default), " *
                                    mu[beta] * " = 0"),
-                  y = expression("RMSE of " * mu[theta])) +
+                  y = "RMSE of metadid / naive") +
     .fig_theme()
 
   # --- J: DiD studies needed to buy back the premium (R) ------------------
@@ -549,7 +590,7 @@ paper_panels <- function(all_agg) {
                                  name = "PP studies") +
     ggplot2::labs(title = "F  Pure null: interval premium (R)",
                   x = "DiD studies",
-                  y = "90% CrI width, full / naive") +
+                  y = "90% CrI width, metadid / naive") +
     .fig_theme()
 
   # --- K/L: bias over the trend plane (Q) ---------------------------------
@@ -578,14 +619,17 @@ paper_panels <- function(all_agg) {
       .fig_bias_fill(q_lim) +
       ggplot2::coord_fixed() +
       ggplot2::labs(title = ttl,
-                    x = expression(mu[beta]^{DiD} * " (normalised)"),
-                    y = expression(mu[beta]^{PP} * " (normalised)")) +
+                    x = "Mean time trend, DiD (normalised)",
+                    y = "Mean time trend, pre-post (normalised)") +
       .fig_theme() +
+      # .fig_theme() blanks legend titles, which suits categorical series but
+      # leaves a continuous bias scale unlabelled -- restore it here.
       ggplot2::theme(panel.grid = ggplot2::element_blank(),
-                     legend.position = "right")
+                     legend.position = "right",
+                     legend.title = ggplot2::element_text(size = 8))
   }
-  gK <- .plane("full",  "G  Trend plane: full model bias (Q)",  1)
-  gL <- .plane("naive", "H  Trend plane: naive model bias (Q)", 0)
+  gK <- .plane("full",  "G  Trend plane: metadid bias (Q)",  1)
+  gL <- .plane("naive", "H  Trend plane: naive bias (Q)", 0)
 
   # --- M: which model to use, over the trend plane (Q) --------------------
   # K and L collapsed into a decision map. A cell is "neither usable" when
@@ -601,8 +645,8 @@ paper_panels <- function(all_agg) {
   pm <- if (.has_arms(pm)) {
     dplyr::mutate(pm, region = dplyr::case_when(
       pmin(abs(full), abs(naive)) > q_tol ~ "Neither usable: drop PP",
-      abs(full) <= abs(naive)             ~ "Full model better",
-      TRUE                                ~ "Naive model better"
+      abs(full) <= abs(naive)             ~ "metadid better",
+      TRUE                                ~ "naive better"
     ))
   } else {
     tibble::tibble(x = numeric(), y = numeric(), region = character())
@@ -613,16 +657,16 @@ paper_panels <- function(all_agg) {
                          linewidth = 0.6) +
     ggplot2::geom_hline(yintercept = 0, colour = "#111111", linewidth = 0.6) +
     ggplot2::scale_fill_manual(values = c(
-      "Full model better"       = "#0072B2",
-      "Naive model better"      = "#D55E00",
+      "metadid better"          = "#0072B2",
+      "naive better"            = "#D55E00",
       "Neither usable: drop PP" = "#4d4d4d"), name = NULL) +
     ggplot2::coord_fixed() +
     ggplot2::labs(
       title = "I  Which model to use (Q)",
       subtitle = sprintf("'neither' = best available |bias| > %.0f%% of the true effect",
                          100 * q_tol_frac),
-      x = expression(mu[beta]^{DiD} * " (normalised)"),
-      y = expression(mu[beta]^{PP} * " (normalised)")) +
+      x = "Mean time trend, DiD (normalised)",
+      y = "Mean time trend, pre-post (normalised)") +
     .fig_theme() +
     ggplot2::theme(panel.grid = ggplot2::element_blank(),
                    plot.subtitle = ggplot2::element_text(size = 7,
@@ -636,10 +680,10 @@ paper_panels <- function(all_agg) {
     d <- SCENARIO_CONFIGS[[id]]$dgp
     tibble::tibble(
       scenario_id = id,
-      added = (d$n_did - 10L) + d$n_rct + d$n_pp,
+      added = (d$n_did - S_CORE) + d$n_rct + d$n_pp,
       curve = dplyr::case_when(
         d$n_rct > 0 & d$n_pp > 0 ~ "RCT + PP",
-        d$n_did > 10L            ~ "DiD (reference)",
+        d$n_did > S_CORE         ~ "DiD (reference)",
         TRUE                     ~ "core"
       )
     )
@@ -663,8 +707,8 @@ paper_panels <- function(all_agg) {
     ggplot2::scale_linetype_manual(values = c(
       "RCT + PP" = "solid", "DiD (reference)" = "dashed")) +
     ggplot2::labs(
-      title = "Information from incomplete designs, high heterogeneity (S)",
-      x = "Studies added to a core of 10 DiD",
+      title = "Incomplete designs reach parity under high heterogeneity (S)",
+      x = sprintf("Studies added to a core of %d DiD", S_CORE),
       y = expression("Posterior SD of " * mu[theta])) +
     ggplot2::expand_limits(y = 0) +
     .fig_theme()
@@ -683,16 +727,18 @@ paper_panels <- function(all_agg) {
 
 illustration_panels <- function(draws) {
   truth <- draws$truth[1]
-  lab <- c(did25_full  = "25 DiD alone",
-           pp25_naive  = "25 PP alone (no-trend)",
-           mixed_full  = "full: 25 DiD + 25 PP",
-           mixed_naive = "naive: 25 DiD + 25 PP",
-           did50_full  = "all 50 DiD (oracle)")
-  cols <- c("25 DiD alone"           = "#5b6770",
-            "25 PP alone (no-trend)" = "#D55E00",
-            "full: 25 DiD + 25 PP"   = "#0072B2",
-            "naive: 25 DiD + 25 PP"  = "#D55E00",
-            "all 50 DiD (oracle)"    = "#1a1a1a")
+  # Labels are derived from the draws so the panel follows run_illustration()'s
+  # n_studies rather than hard-coding 25/50.
+  h <- if ("half" %in% names(draws)) draws$half[1] else 25L
+  n <- if ("n_studies" %in% names(draws)) draws$n_studies[1] else 50L
+  nm <- c(did_half_full  = sprintf("%d DiD alone", h),
+          pp_half_naive  = sprintf("%d PP alone (no-trend)", h),
+          mixed_full     = sprintf("metadid: %d DiD + %d PP", h, h),
+          mixed_naive    = sprintf("naive: %d DiD + %d PP", h, h),
+          did_all_full   = sprintf("all %d DiD (oracle)", n))
+  lab <- nm
+  cols <- setNames(c("#5b6770", "#D55E00", "#0072B2", "#D55E00", "#1a1a1a"),
+                   unname(nm))
   d <- draws |> dplyr::mutate(model = unname(lab[model]))
 
   mk <- function(models, ttl) {
@@ -713,9 +759,12 @@ illustration_panels <- function(draws) {
                      axis.ticks.y = ggplot2::element_blank())
   }
   list(
-    split  = mk(c("did25_full", "pp25_naive"),
+    split  = mk(c("did_half_full", "pp_half_naive"),
                 "One dataset, split and analysed separately"),
-    pooled = mk(c("mixed_full", "mixed_naive", "did50_full", "did25_full"),
+    # Three densities only: the two pooled analyses against the all-DiD
+    # oracle. The DiD-half-alone arm carries panel A and is left out here so
+    # the comparison that matters -- pooled vs oracle -- is not crowded.
+    pooled = mk(c("mixed_full", "mixed_naive", "did_all_full"),
                 "Pooling the designs")
   )
 }
@@ -731,16 +780,16 @@ illustration_panels <- function(draws) {
 #' @param all_agg Aggregated results tibble.
 #' @param illustration Draws tibble from run_illustration().
 #' @return A patchwork object (6 panels, 2 rows x 3 columns).
-plot_figure1 <- function(all_agg, illustration) {
-  p  <- paper_panels(all_agg)
+plot_figure1 <- function(all_agg, illustration, paired = NULL) {
+  p  <- paper_panels(all_agg, paired)
   il <- illustration_panels(illustration)
   patchwork::wrap_plots(
-    .retitle(il$split,  "A  One dataset, analysed separately"),
-    .retitle(p$E, "B  Information from incomplete designs (K)"),
-    .retitle(p$F, "C  Pure null: interval premium (R)"),
-    .retitle(il$pooled, "D  Pooling the designs"),
-    .retitle(p$S, "E  As B, high effect heterogeneity (S)"),
-    .retitle(p$D, "F  Variable trends, zero mean: RMSE ratio (M)"),
+    .retitle(il$split,  "A  Stratified inference"),
+    .retitle(p$E, expression("B  Marginal study information for low " * tau[theta])),
+    .retitle(p$F, "C  Zero time trends"),
+    .retitle(il$pooled, "D  Pooled inference"),
+    .retitle(p$S, expression("E  Marginal study information for high " * tau[theta])),
+    .retitle(p$D, "F  Mean zero time trends"),
     ncol = 3
   )
 }
@@ -752,23 +801,14 @@ plot_figure1 <- function(all_agg, illustration) {
 plot_figure2 <- function(all_agg) {
   p <- paper_panels(all_agg)
   patchwork::wrap_plots(
-    .retitle(p$G, "A  Trend plane: full model bias (Q)"),
-    .retitle(p$H, "B  Trend plane: naive model bias (Q)"),
-    .retitle(p$I, "C  Which model to use (Q)"),
-    ncol = 2
-  )
-}
-
-#' Supplementary figure: panels displaced from the main figures
-#'
-#' @param all_agg Aggregated results tibble.
-#' @return A patchwork object.
-plot_figure_si <- function(all_agg) {
-  p <- paper_panels(all_agg)
-  patchwork::wrap_plots(
-    .retitle(p$A, "S1  Calibration (A/F scenarios)"),
-    .retitle(p$B, "S2  Systematic trends: bias (J)"),
-    .retitle(p$C, "S3  Variable trends, zero mean: coverage (M)"),
-    ncol = 2
-  )
+    .retitle(p$G, "A  metadid bias"),
+    .retitle(p$H, "B  naive bias"),
+    .retitle(p$I, "C  Which model to use"),
+    ncol = 3
+  ) +
+    # A and B share an identical fill scale, so collecting guides merges them
+    # into one legend and lets all three panels sit on a single row.
+    patchwork::plot_layout(guides = "collect") &
+    ggplot2::theme(legend.position = "bottom",
+                   legend.key.width = ggplot2::unit(1.4, "lines"))
 }

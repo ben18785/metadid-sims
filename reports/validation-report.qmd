@@ -97,39 +97,19 @@ kable(
 
 ## Paper Figure
 
-The multi-panel figure below assembles the results that underpin the paper's
-simulation figure. Panel A shows calibration across the A/F scenarios (shaded
-band: binomial 95% acceptance region around nominal at the maximum replication
-count). Panels B-H are parameter sweeps from the figure categories J-P, run at
-a reduced replication count (`N_REPS_FIG` in `_targets.R`): B sweeps the trend
-mean (naive-vs-full bias), C the between-study trend variability at zero mean
-(coverage), D the design composition (posterior SD, with RCT-only and PP-only
-splits against a DiD reference), E outlier contamination (RMSE, normal vs
-Student-t), F the pre-post/DiD trend gap (bias, both models), G the crossover
-sweep in which the PP trend passes through the DiD trend (the full model is
-unbiased only at exchangeability; the naive model only at zero PP trend), and
-H the RCT baseline-imbalance sweep (the gamma analogue of B). Coverage-based
-panels are not resolved at low replication counts; raise `N_REPS_FIG` for the
-camera-ready run.
+The publication figures are **not** rendered in this report. Figure 1 and
+Figure 2 are built by the `paper-figure` workflow, which simulates the
+figure-only categories (K, M, Q, R, S, T) itself and publishes
+`figure1`/`figure2` (PNG and PDF) plus `figure_panels.csv`,
+`illustration_draws.csv` and `paired_rmse_MT.csv` as run artifacts.
 
-Figure 1 and Figure 2 are **not** rendered here: they need the Q/R/S
-categories, which are figure-only and deliberately excluded from the nightly
-pipeline (see `all_agg` in `_targets.R`). They are built by the `paper-figure`
-workflow and published as artifacts there. Only the supplementary panels,
-whose categories the nightly does run, appear below.
+Those categories are deliberately excluded from this nightly pipeline: they
+are generated programmatically, so the scenario matrix in `sims.yaml` cannot
+see them, and pulling them into `all_agg` would make this report's job
+re-simulate every one of them serially on a single runner.
 
-Supplementary panels displaced from the main figures.
-
-```{r figure-si}
-#| fig-height: 9
-#| fig-width: 12
-#| column: screen
-#| out-width: "100%"
-plot_figure_si(all_agg)
-```
-
-The same data are exported as `output/figure_panels.csv` (target
-`figure_data_csv`) for the standalone figure script.
+The nightly sweep aggregates are still exported as `output/figure_panels.csv`
+(target `figure_data_csv`), tagged by scenario category.
 
 ## A. Calibration Studies
 

@@ -1,10 +1,9 @@
 name: paper-figure
 
-# Runs ONLY the paper-figure sweep categories (J-P) and exports
-# output/figure_panels.csv plus a rendered figure. Panel A's calibration
-# rows are pulled from the latest published full run on gh-pages rather
-# than recomputed, so this workflow stays fast (~30-60 min) and is safe
-# to iterate on without touching the daily simulations pipeline.
+# Runs ONLY the figure sweep categories (K, M, Q, R, S, T) and exports
+# output/figure_panels.csv plus Figure 1 and Figure 2. Self-contained: every
+# category it needs is simulated here, so it stays fast (~30-60 min) and is
+# safe to iterate on without touching the daily simulations pipeline.
 #
 # Trigger manually from the Actions tab. "reps" sets the replication
 # count for the sweep categories (default 5; use 25-100+ for the
@@ -40,7 +39,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        category: [J, K, M, Q, R, S]
+        category: [K, M, Q, R, S, T]
     env:
       N_REPS_FIG: ${{ inputs.reps }}
     steps:
@@ -111,9 +110,9 @@ jobs:
           retention-days: 14
 
   # ---------------------------------------------------------------------------
-  # assemble: merge category stores, build figure_panels.csv, fetch the
-  # A/F calibration rows from the latest published full run, render the
-  # eight-panel figure, and upload everything as artifacts.
+  # assemble: merge category stores, build figure_panels.csv, compute the
+  # paired full/naive RMSE contrast, render Figure 1 and Figure 2, and upload
+  # everything as artifacts.
   # ---------------------------------------------------------------------------
   assemble:
     name: Assemble figure
@@ -194,19 +193,6 @@ jobs:
           done | awk -F'|' '!seen[$1]++' >> _targets/meta/meta
           echo "Merged $(wc -l < _targets/meta/meta) meta rows, $(ls _targets/objects | wc -l) objects."
 
-      - name: Fetch A/F calibration rows from latest full run
-        working-directory: metadid-sims
-        run: |
-          set -euo pipefail
-          mkdir -p output
-          url="https://raw.githubusercontent.com/${{ github.repository }}/gh-pages/latest/aggregated_results.csv"
-          if curl -fsSL -o output/latest_full_agg.csv "$url"; then
-            echo "Fetched latest full-run aggregates ($(wc -l < output/latest_full_agg.csv) rows)"
-          else
-            echo "::warning::No published full run found; panel A will be empty"
-            rm -f output/latest_full_agg.csv
-          fi
-
       - name: Build figure data and render figure
         working-directory: metadid-sims
         run: |
@@ -215,32 +201,24 @@ jobs:
             library(dplyr)
 
             # Build the sweep aggregates (cached from the category jobs).
-            tar_make(names = c("J_agg", "K_agg", "M_agg",
-                               "Q_agg", "R_agg", "S_agg",
-                               "illustration_draws"))
+            tar_make(names = c("K_agg", "M_agg",
+                               "Q_agg", "R_agg", "S_agg", "T_agg",
+                               "paired_rmse_MT", "illustration_draws"))
 
             tar_source("R/scenarios.R")
             tar_source("R/plots.R")
 
             # Tagged by category, not panel position -- see _targets.R.
             sweeps <- bind_rows(
-              mutate(tar_read(J_agg), category = "J"),
               mutate(tar_read(M_agg), category = "M"),
               mutate(tar_read(K_agg), category = "K"),
               mutate(tar_read(R_agg), category = "R"),
               mutate(tar_read(Q_agg), category = "Q"),
-              mutate(tar_read(S_agg), category = "S")
+              mutate(tar_read(S_agg), category = "S"),
+              mutate(tar_read(T_agg), category = "T")
             )
 
-            # Panel A rows from the latest published full run (if available).
-            af <- NULL
-            if (file.exists("output/latest_full_agg.csv")) {
-              af <- readr::read_csv("output/latest_full_agg.csv",
-                                    show_col_types = FALSE) |>
-                filter(grepl("^[AF][0-9]", scenario_id)) |>
-                mutate(category = "AF")
-            }
-            all_agg <- bind_rows(af, sweeps)
+            all_agg <- sweeps
 
             dir.create("output", showWarnings = FALSE)
             all_agg |>
@@ -250,20 +228,18 @@ jobs:
             # Publication layouts: Figure 1, Figure 2, and the SI panels.
             illus <- tar_read(illustration_draws)
             readr::write_csv(illus, "output/illustration_draws.csv")
-            f1 <- plot_figure1(all_agg, illus)
+            paired <- tar_read(paired_rmse_MT)
+            readr::write_csv(paired, "output/paired_rmse_MT.csv")
+            f1 <- plot_figure1(all_agg, illus, paired)
             ggplot2::ggsave("output/figure1.png", f1, width = 13, height = 9,
                             dpi = 300, limitsize = FALSE)
             ggplot2::ggsave("output/figure1.pdf", f1, width = 13, height = 9,
                             limitsize = FALSE)
+            # Single row of three panels with collected legends beneath.
             f2 <- plot_figure2(all_agg)
-            ggplot2::ggsave("output/figure2.png", f2, width = 12, height = 11,
+            ggplot2::ggsave("output/figure2.png", f2, width = 13, height = 5,
                             dpi = 300, limitsize = FALSE)
-            ggplot2::ggsave("output/figure2.pdf", f2, width = 12, height = 11,
-                            limitsize = FALSE)
-            fsi <- plot_figure_si(all_agg)
-            ggplot2::ggsave("output/figure_si.png", fsi, width = 12, height = 9,
-                            dpi = 300, limitsize = FALSE)
-            ggplot2::ggsave("output/figure_si.pdf", fsi, width = 12, height = 9,
+            ggplot2::ggsave("output/figure2.pdf", f2, width = 13, height = 5,
                             limitsize = FALSE)
           '
 
@@ -274,11 +250,10 @@ jobs:
           path: |
             metadid-sims/output/figure_panels.csv
             metadid-sims/output/illustration_draws.csv
+            metadid-sims/output/paired_rmse_MT.csv
             metadid-sims/output/figure1.png
             metadid-sims/output/figure1.pdf
             metadid-sims/output/figure2.png
             metadid-sims/output/figure2.pdf
-            metadid-sims/output/figure_si.png
-            metadid-sims/output/figure_si.pdf
           if-no-files-found: error
           retention-days: 90

@@ -4,12 +4,12 @@
 # substantial common time trend, converts 25 of them to pre-post, and fits
 # five models:
 #
-#   did25_full   full model, the 25 remaining DiD studies alone
-#   pp25_naive   the 25 PP studies alone, analysed at face value
+#   did_half_full   full model, the first half of the DiD studies alone
+#   pp_half_naive   the second half as PP studies, analysed at face value
 #                (time_trend = "fixed_zero"; requires allow_no_did = TRUE)
 #   mixed_full   full model, 25 DiD + 25 PP
 #   mixed_naive  naive model, 25 DiD + 25 PP
-#   did50_full   full model, all 50 original DiD studies (the oracle)
+#   did_all_full   full model, all n_studies as DiD (the oracle)
 #
 # Returns tidy posterior draws of treatment_effect_mean for KDE panels,
 # plus the true normalised effect. The seed is FIXED (set before inspecting
@@ -17,13 +17,16 @@
 
 library(metadid)
 
-run_illustration <- function(seed = 495L, pkg = NULL) {
+run_illustration <- function(seed = 495L, n_studies = 20L,
+                             sigma_effect = 0.08, pkg = NULL) {
+  stopifnot(n_studies %% 2L == 0L)
+  half <- n_studies %/% 2L
   dgp <- list(
-    n_studies     = 50L,
+    n_studies     = n_studies,
     n_control     = 100L,
     n_treatment   = 100L,
     true_effect   = -0.15,
-    sigma_effect  = 0.03,
+    sigma_effect  = sigma_effect,
     true_trend    = -0.10,
     sigma_trend   = 0.01,
     baseline_mean = 0.45,
@@ -39,16 +42,16 @@ run_illustration <- function(seed = 495L, pkg = NULL) {
     attr(s, "true_params") <- dplyr::filter(tp, study_id %in% keep)
     s
   }
-  did_half <- metadid::as_summary_did(subset_sim(ids[1:25]))
-  pp_half  <- metadid::as_summary_pp(subset_sim(ids[26:50]))
+  did_half <- metadid::as_summary_did(subset_sim(ids[seq_len(half)]))
+  pp_half  <- metadid::as_summary_pp(subset_sim(ids[(half + 1L):n_studies]))
   all_did  <- metadid::as_summary_did(sim)
   mixed    <- dplyr::bind_rows(did_half, pp_half)
 
   opts <- c(MCMC_OPTS, list(seed = seed))
   fits <- list(
-    did25_full  = do.call(metadid::meta_did,
+    did_half_full  = do.call(metadid::meta_did,
                           c(list(summary_data = did_half), opts)),
-    pp25_naive  = do.call(metadid::meta_did_general,
+    pp_half_naive  = do.call(metadid::meta_did_general,
                           c(list(summary_data       = pp_half,
                                  time_trend         = "fixed_zero",
                                  baseline_imbalance = "fixed_zero",
@@ -59,7 +62,7 @@ run_illustration <- function(seed = 495L, pkg = NULL) {
                           c(list(summary_data       = mixed,
                                  time_trend         = "fixed_zero",
                                  baseline_imbalance = "fixed_zero"), opts)),
-    did50_full  = do.call(metadid::meta_did,
+    did_all_full  = do.call(metadid::meta_did,
                           c(list(summary_data = all_did), opts))
   )
 
@@ -76,5 +79,7 @@ run_illustration <- function(seed = 495L, pkg = NULL) {
         f$fit$draws("treatment_effect_mean", format = "draws_matrix"))
     )
   }) |>
-    dplyr::mutate(truth = truth, seed = seed)
+    dplyr::mutate(truth = truth, seed = seed,
+                  n_studies = n_studies, half = half,
+                  sigma_effect = sigma_effect)
 }

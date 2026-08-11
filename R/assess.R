@@ -151,3 +151,68 @@ aggregate_scenario <- function(results) {
       .groups = "drop"
     )
 }
+
+# ===========================================================================
+# Paired RMSE contrast between two model arms
+# ===========================================================================
+
+#' Paired full/naive RMSE ratio with a Monte Carlo interval
+#'
+#' Both comparison arms of a scenario are fitted to the SAME simulated dataset
+#' within a replicate (see run_one_rep()), so their errors are correlated.
+#' Taking the ratio of two separately-aggregated RMSEs throws that pairing
+#' away and inflates the Monte Carlo error substantially; resampling REPLICATES
+#' (not arms) keeps it. At the low replication counts the figure sweeps use,
+#' this is the difference between a readable curve and noise.
+#'
+#' @param rep_results Per-replication results with model_label, bias, and the
+#'   tar_map_rep replicate keys (tar_batch / tar_rep).
+#' @param num,den     Model labels for the numerator and denominator.
+#' @param param       Parameter to contrast.
+#' @param n_boot      Paired bootstrap resamples.
+#' @param seed        Fixed for reproducibility across pipeline runs.
+#' @return Tibble: scenario_id, n_reps, ratio, lo, hi.
+paired_rmse_ratio <- function(rep_results, num = "full", den = "naive",
+                              param = "treatment_effect_mean",
+                              n_boot = 2000L, seed = 1L) {
+  keys <- intersect(c("tar_batch", "tar_rep"), names(rep_results))
+  if (!length(keys)) {
+    stop("rep_results has no tar_batch/tar_rep replicate key")
+  }
+
+  wide <- rep_results |>
+    dplyr::filter(parameter == param, model_label %in% c(num, den)) |>
+    dplyr::select(dplyr::all_of(c("scenario_id", keys, "model_label", "bias"))) |>
+    tidyr::pivot_wider(names_from = model_label, values_from = bias)
+
+  if (!all(c(num, den) %in% names(wide))) return(tibble::tibble())
+
+  rmse_ratio <- function(a, b) sqrt(mean(a^2) / mean(b^2))
+
+  withr::with_seed(seed, {
+    wide |>
+      dplyr::group_by(scenario_id) |>
+      dplyr::group_modify(function(g, ...) {
+        a <- g[[num]]; b <- g[[den]]
+        ok <- is.finite(a) & is.finite(b)
+        a <- a[ok]; b <- b[ok]
+        if (length(a) < 2L) {
+          return(tibble::tibble(n_reps = length(a), ratio = NA_real_,
+                                lo = NA_real_, hi = NA_real_))
+        }
+        # Resample REPLICATES, carrying both arms together -- this is what
+        # preserves the pairing.
+        boot <- vapply(seq_len(n_boot), function(i) {
+          idx <- sample.int(length(a), replace = TRUE)
+          rmse_ratio(a[idx], b[idx])
+        }, numeric(1))
+        tibble::tibble(
+          n_reps = length(a),
+          ratio  = rmse_ratio(a, b),
+          lo     = unname(quantile(boot, 0.05, na.rm = TRUE)),
+          hi     = unname(quantile(boot, 0.95, na.rm = TRUE))
+        )
+      }) |>
+      dplyr::ungroup()
+  })
+}

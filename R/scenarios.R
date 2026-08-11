@@ -75,6 +75,11 @@ default_fit <- list(
   data_format              = "summary"
 )
 
+# Size of the DiD core that the composition sweeps build on. Exported so the
+# panel code derives "studies added" instead of hard-coding the value.
+K_CORE <- 5L    # category K (panel B): small core, default effect heterogeneity
+S_CORE <- 10L   # category S (panel E): high effect heterogeneity
+
 # Helper: merge user overrides into defaults
 scenario <- function(description, dgp = list(), fit = list(),
                      true = list(), compare = NULL) {
@@ -1067,89 +1072,93 @@ SCENARIO_CONFIGS <- list(
     )
   ),
 
+  # Core: 5 DiD studies. Panel B asks what adding lower-quality designs
+  # buys when the DiD evidence base is SMALL, so the core is deliberately
+  # thin; K_CORE is exported so the panel code derives "studies added"
+  # rather than hard-coding it.
   K1 = scenario(
-    "Figure panel D: 10 DiD + 0 RCT + 0 PP (0 incomplete studies added)",
-    dgp = list(n_did = 10L, n_rct = 0L, n_pp = 0L)
+    "Figure panel B: 5 DiD + 0 RCT + 0 PP (0 incomplete studies added)",
+    dgp = list(n_did = 5L, n_rct = 0L, n_pp = 0L)
   ),
 
   K2 = scenario(
-    "Figure panel D: 10 DiD + 5 RCT + 5 PP (10 incomplete studies added)",
-    dgp = list(n_did = 10L, n_rct = 5L, n_pp = 5L)
+    "Figure panel B: 5 DiD + 5 RCT + 5 PP (10 incomplete studies added)",
+    dgp = list(n_did = 5L, n_rct = 5L, n_pp = 5L)
   ),
 
   K3 = scenario(
-    "Figure panel D: 10 DiD + 10 RCT + 10 PP (20 incomplete studies added)",
-    dgp = list(n_did = 10L, n_rct = 10L, n_pp = 10L)
+    "Figure panel B: 5 DiD + 10 RCT + 10 PP (20 incomplete studies added)",
+    dgp = list(n_did = 5L, n_rct = 10L, n_pp = 10L)
   ),
 
   K4 = scenario(
-    "Figure panel D: 10 DiD + 20 RCT + 20 PP (40 incomplete studies added)",
-    dgp = list(n_did = 10L, n_rct = 20L, n_pp = 20L)
+    "Figure panel B: 5 DiD + 20 RCT + 20 PP (40 incomplete studies added)",
+    dgp = list(n_did = 5L, n_rct = 20L, n_pp = 20L)
   ),
 
   K5 = scenario(
-    "Figure panel D: 10 DiD + 40 RCT + 40 PP (80 incomplete studies added)",
-    dgp = list(n_did = 10L, n_rct = 40L, n_pp = 40L)
+    "Figure panel B: 5 DiD + 40 RCT + 40 PP (80 incomplete studies added)",
+    dgp = list(n_did = 5L, n_rct = 40L, n_pp = 40L)
   ),
 
   K6 = scenario(
-    "Figure panel D reference: 20 DiD studies (10 DiD added to core of 10)",
-    dgp = list(n_did = 20L)
+    "Figure panel B reference: 15 DiD studies (10 DiD added to core of 5)",
+    dgp = list(n_did = 15L)
   ),
 
   K7 = scenario(
-    "Figure panel D reference: 30 DiD studies (20 DiD added to core of 10)",
-    dgp = list(n_did = 30L)
+    "Figure panel B reference: 25 DiD studies (20 DiD added to core of 5)",
+    dgp = list(n_did = 25L)
   ),
 
   K8 = scenario(
-    "Figure panel D reference: 50 DiD studies (40 DiD added to core of 10)",
-    dgp = list(n_did = 50L)
+    "Figure panel B reference: 45 DiD studies (40 DiD added to core of 5)",
+    dgp = list(n_did = 45L)
   ),
 
   K9 = scenario(
-    "Figure panel D reference: 90 DiD studies (80 DiD added to core of 10)",
-    dgp = list(n_did = 90L)
+    "Figure panel B reference: 85 DiD studies (80 DiD added to core of 5)",
+    dgp = list(n_did = 85L)
   ),
 
   K10 = scenario(
-    "Figure panel D split: 10 DiD + 10 RCT only (10 added)",
-    dgp = list(n_did = 10L, n_rct = 10L, n_pp = 0L)
+    "Figure panel B split: 5 DiD + 10 RCT only (10 added)",
+    dgp = list(n_did = 5L, n_rct = 10L, n_pp = 0L)
   ),
 
   K11 = scenario(
-    "Figure panel D split: 10 DiD + 20 RCT only (20 added)",
-    dgp = list(n_did = 10L, n_rct = 20L, n_pp = 0L)
+    "Figure panel B split: 5 DiD + 20 RCT only (20 added)",
+    dgp = list(n_did = 5L, n_rct = 20L, n_pp = 0L)
   ),
 
   K12 = scenario(
-    "Figure panel D split: 10 DiD + 40 RCT only (40 added)",
-    dgp = list(n_did = 10L, n_rct = 40L, n_pp = 0L)
+    "Figure panel B split: 5 DiD + 40 RCT only (40 added)",
+    dgp = list(n_did = 5L, n_rct = 40L, n_pp = 0L)
   ),
 
   K13 = scenario(
-    "Figure panel D split: 10 DiD + 80 RCT only (80 added)",
-    dgp = list(n_did = 10L, n_rct = 80L, n_pp = 0L)
+    "Figure panel B split: 5 DiD + 80 RCT only (80 added)",
+    dgp = list(n_did = 5L, n_rct = 80L, n_pp = 0L)
   ),
 
   K14 = scenario(
-    "Figure panel D split: 10 DiD + 10 PP only (10 added)",
-    dgp = list(n_did = 10L, n_rct = 0L, n_pp = 10L)
+    "Figure panel B split: 5 DiD + 10 PP only (10 added)",
+    dgp = list(n_did = 5L, n_rct = 0L, n_pp = 10L)
   ),
 
   K15 = scenario(
-    "Figure panel D split: 10 DiD + 20 PP only (20 added)",
-    dgp = list(n_did = 10L, n_rct = 0L, n_pp = 20L)
+    "Figure panel B split: 5 DiD + 20 PP only (20 added)",
+    dgp = list(n_did = 5L, n_rct = 0L, n_pp = 20L)
   ),
 
   K16 = scenario(
-    "Figure panel D split: 10 DiD + 40 PP only (40 added)",
-    dgp = list(n_did = 10L, n_rct = 0L, n_pp = 40L)
+    "Figure panel B split: 5 DiD + 40 PP only (40 added)",
+    dgp = list(n_did = 5L, n_rct = 0L, n_pp = 40L)
   ),
 
   K17 = scenario(
-    "Figure panel D split: 10 DiD + 80 PP only (80 added)",
-    dgp = list(n_did = 10L, n_rct = 0L, n_pp = 80L)
+    "Figure panel B split: 5 DiD + 80 PP only (80 added)",
+    dgp = list(n_did = 5L, n_rct = 0L, n_pp = 80L)
   ),
 
   L1 = scenario(
@@ -1751,6 +1760,31 @@ for (.i in seq_len(nrow(R_GRID))) {
   )
 }
 rm(.i, .nd, .np)
+
+# ---------------------------------------------------------------------------
+# Category T: the M sweep at a PP-heavy composition (figure panel F)
+#
+# Identical to M (mu_beta = 0, sigma_beta swept) but with 5 DiD + 25 PP instead
+# of 15 + 15. The full/naive RMSE ratio should separate EARLIER here: the more
+# of the evidence base leans on PP studies, the more ignoring between-study
+# trend variation costs. Same lever as panel C, so C and F tell one story.
+# ---------------------------------------------------------------------------
+T_SIGMA <- c(0, 0.02, 0.04, 0.06, 0.1, 0.14)
+
+for (.i in seq_along(T_SIGMA)) {
+  .sd <- T_SIGMA[.i]
+  SCENARIO_CONFIGS[[paste0("T", .i)]] <- scenario(
+    sprintf("Figure panel F: zero-mean trends, sigma_trend = %s, 5 DiD + 25 PP",
+            .sd),
+    dgp = list(n_did = 5L, n_pp = 25L, true_trend = 0, sigma_trend = .sd),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general",
+           time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
+    )
+  )
+}
+rm(.i, .sd)
 
 # ---------------------------------------------------------------------------
 # Category S: information from incomplete designs under HIGH effect

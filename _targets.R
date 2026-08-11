@@ -477,6 +477,26 @@ list(
   ),
   tar_target(R_agg, aggregate_scenario(R_rep)),
 
+  # ---- Category T: M sweep at a PP-heavy composition (panel F) ----
+  tarchetypes::tar_map_rep(
+    name    = T_rep,
+    command = run_one_rep(scenario_id, config, targets::tar_seed_get(), metadid_src),
+    values  = scenario_values(scenario_ids("T")),
+    names   = tidyselect::any_of("scenario_id"),
+    batches = N_REPS_FIG,
+    reps    = 1
+  ),
+  tar_target(T_agg, aggregate_scenario(T_rep)),
+
+  # ---- Paired full/naive RMSE contrast for panel F ----
+  # Computed from rep-level data, not from the aggregates: both arms share a
+  # simulated dataset within a replicate, and resampling replicates keeps that
+  # pairing (see paired_rmse_ratio()).
+  tar_target(
+    paired_rmse_MT,
+    dplyr::bind_rows(paired_rmse_ratio(M_rep), paired_rmse_ratio(T_rep))
+  ),
+
   # ---- Category S: composition sweep, high effect heterogeneity ----
   tarchetypes::tar_map_rep(
     name    = S_rep,
