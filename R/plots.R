@@ -359,6 +359,13 @@ plot_divergences <- function(agg_results) {
 
 # Diverging fill for signed bias surfaces (panels K/L). Deliberately NOT the
 # categorical model hues: here colour encodes sign and magnitude, not identity.
+# TRUE when a pivoted frame actually has both model arms. Panels are built
+# eagerly, so without this a category absent from `all_agg` (e.g. previewing a
+# partial figure_panels.csv locally) would error out the whole panel list.
+.has_arms <- function(df) {
+  all(c("full", "naive") %in% names(df)) && nrow(df) > 0
+}
+
 .fig_bias_fill <- function(limit) {
   ggplot2::scale_fill_gradient2(
     low = "#2166AC", mid = "#F7F7F7", high = "#B2182B", midpoint = 0,
@@ -370,8 +377,14 @@ plot_divergences <- function(agg_results) {
 #' Multi-panel paper figure from aggregated results
 #'
 #' @param all_agg Aggregated results tibble (scenario x model x parameter).
-#' @return A patchwork object (8 panels, 4 x 2).
-plot_paper_figure <- function(all_agg) {
+#' @return Named list of ggplot objects, one per panel letter.
+#'
+#' Split out from plot_paper_figure() so a single panel can be rebuilt and
+#' previewed locally from a downloaded figure_panels.csv, without rerunning
+#' the pipeline:  paper_panels(readr::read_csv("figure_panels.csv"))$I
+#' Panels whose category is absent from `all_agg` come back empty rather than
+#' erroring, so a partial CSV still lets you inspect the panels it does cover.
+paper_panels <- function(all_agg) {
   te <- all_agg |> dplyr::filter(parameter == "treatment_effect_mean")
 
   # --- A: calibration coverage across A and F scenarios -------------------
@@ -478,99 +491,65 @@ plot_paper_figure <- function(all_agg) {
     ggplot2::scale_linetype_manual(values = c(
       "RCT + PP" = "solid", "RCT only" = "solid",
       "PP only" = "solid", "DiD (reference)" = "dashed")) +
-    ggplot2::labs(title = "D  Information from incomplete designs (K)",
+    ggplot2::labs(title = "E  Information from incomplete designs (K)",
                   x = "Studies added to a core of 10 DiD",
                   y = expression("Posterior SD of " * mu[theta])) +
     ggplot2::expand_limits(y = 0) +
     .fig_theme()
 
-  # --- E: outlier contamination (L) ---------------------------------------
-  pe <- sweep_data("L", function(d, id) 100 * d$n_outlier / d$n_did)
-  gE <- ggplot2::ggplot(pe, ggplot2::aes(x, rmse, colour = model_label)) +
-    ggplot2::geom_point(size = 1.6) +
-    ggplot2::geom_line(linewidth = 0.5) +
-    ggplot2::scale_colour_manual(values = .fig_model_cols) +
-    ggplot2::labs(title = "E  Outlying studies: RMSE (L)",
-                  x = "Outlying studies (%)",
-                  y = expression("RMSE of " * mu[theta])) +
-    ggplot2::expand_limits(y = 0) +
-    .fig_theme()
-
-  # --- F: exchangeability gap sweep (N) -----------------------------------
-  pf <- sweep_data("N", function(d, id) (d$did_trend - d$pp_trend) / .fig_base(id))
-  gF <- ggplot2::ggplot(pf, ggplot2::aes(x, mean_bias, colour = model_label)) +
-    ggplot2::geom_hline(yintercept = 0, linetype = "dashed") +
-    ggplot2::geom_point(size = 1.6) +
-    ggplot2::geom_smooth(method = "lm", se = FALSE, linewidth = 0.5,
-                         linetype = "dotted", formula = y ~ x) +
-    ggplot2::scale_colour_manual(values = .fig_model_cols) +
-    ggplot2::labs(title = "F  Exchangeability violations (N)",
-                  x = expression("PP vs DiD trend difference " * Delta *
-                                   " (normalised)"),
-                  y = expression("Bias in " * mu[theta])) +
-    .fig_theme()
-
-  # --- G: crossover sweep (O) ---------------------------------------------
-  pg <- sweep_data("O", function(d, id) d$pp_trend / .fig_base(id))
-  x_did <- SCENARIO_CONFIGS[["O1"]]$dgp$did_trend / .fig_base("O1")
-  gG <- ggplot2::ggplot(pg, ggplot2::aes(x, mean_bias, colour = model_label)) +
-    ggplot2::geom_hline(yintercept = 0, linetype = "dashed") +
-    ggplot2::geom_vline(xintercept = x_did, linetype = "dotdash",
-                        colour = "#6b6b6b") +
-    ggplot2::geom_point(size = 1.6) +
-    ggplot2::geom_smooth(method = "lm", se = FALSE, linewidth = 0.5,
-                         linetype = "dotted", formula = y ~ x) +
-    ggplot2::scale_colour_manual(values = .fig_model_cols) +
-    ggplot2::labs(title = "G  Trend crossover: when borrowing hurts (O)",
-                  x = expression("True PP trend " * mu[beta]^{PP} *
-                                   " (normalised); vline = DiD trend"),
-                  y = expression("Bias in " * mu[theta])) +
-    .fig_theme()
-
-  # --- H: RCT baseline-imbalance sweep (P) --------------------------------
-  ph <- sweep_data("P", function(d, id) d$rct_gamma_mean / .fig_base(id))
-  gH <- ggplot2::ggplot(ph, ggplot2::aes(x, mean_bias, colour = model_label)) +
-    ggplot2::geom_hline(yintercept = 0, linetype = "dashed") +
-    ggplot2::geom_point(size = 1.6) +
-    ggplot2::geom_smooth(method = "lm", se = FALSE, linewidth = 0.5,
-                         linetype = "dotted", formula = y ~ x) +
-    ggplot2::scale_colour_manual(values = .fig_model_cols) +
-    ggplot2::labs(title = "H  RCT baseline imbalance (P)",
-                  x = expression("RCT imbalance " * mu[gamma] * " (normalised)"),
-                  y = expression("Bias in " * mu[theta])) +
-    .fig_theme()
-
-  # --- I: cost of the unnecessary variance component (M) ------------------
-  # Same sweep as panel C, but on interval width. mu_beta = 0 throughout, so
-  # all three arms are unbiased and this is a pure efficiency comparison --
-  # RMSE would barely register it. Read the left edge (sigma_beta = 0, the
-  # truth has no trend at all): the naive -> homog gap is the cost of allowing
-  # a trend level, the homog -> hier gap is the cost of falsely allowing
-  # trend variability.
+  # --- I: efficiency over the trend-variability sweep (M) -----------------
+  # Same sweep as panel C, on RMSE. mu_beta = 0 throughout, so no arm is
+  # biased in mean and RMSE here is driven by the sampling VARIANCE of the
+  # point estimate -- which is where the naive model's cost shows up, and
+  # much more sharply than interval width shows it (naive/full RMSE reaches
+  # ~5x on this sweep vs ~1.5x on width). Ignoring genuine between-study
+  # trend variation propagates that variation straight into mu_theta.
   pi_ <- sweep_data("M", function(d, id) d$sigma_trend / 0.02)
-  gI <- ggplot2::ggplot(pi_, ggplot2::aes(x, mean_ci_width,
-                                          colour = model_label)) +
+  gI <- ggplot2::ggplot(pi_, ggplot2::aes(x, rmse, colour = model_label)) +
     ggplot2::geom_point(size = 1.6) +
     ggplot2::geom_line(linewidth = 0.5) +
     ggplot2::scale_colour_manual(values = .fig_model_cols) +
     ggplot2::expand_limits(y = 0) +
-    ggplot2::labs(title = "I  Cost of allowing trend variability (M)",
+    ggplot2::labs(title = "D  Variable trends, zero mean: RMSE (M)",
                   x = expression(tau[beta] * " (multiples of default), " *
                                    mu[beta] * " = 0"),
-                  y = expression("Mean 90% CrI width for " * mu[theta])) +
+                  y = expression("RMSE of " * mu[theta])) +
     .fig_theme()
 
   # --- J: DiD studies needed to buy back the premium (R) ------------------
-  pj <- sweep_data("R", function(d, id) d$n_did)
-  gJ <- ggplot2::ggplot(pj, ggplot2::aes(x, mean_ci_width,
-                                         colour = model_label)) +
-    ggplot2::geom_point(size = 1.6) +
+  # Ratio, not absolute width: total N grows along the sweep, so both models
+  # tighten and only the RATIO isolates what the full model actually costs.
+  # 1.0 means the insurance is free. One line per PP count, because the
+  # premium is driven by how much PP evidence has to lean on the borrowed
+  # trend -- not by the DiD count alone.
+  r_meta <- purrr::map_dfr(scenario_ids("R"), function(id) {
+    d <- SCENARIO_CONFIGS[[id]]$dgp
+    tibble::tibble(scenario_id = id, x = d$n_did, n_pp = d$n_pp)
+  })
+  pj <- te |>
+    dplyr::filter(scenario_id %in% r_meta$scenario_id,
+                  model_label %in% c("full", "naive")) |>
+    dplyr::select(scenario_id, model_label, mean_ci_width) |>
+    tidyr::pivot_wider(names_from = model_label, values_from = mean_ci_width)
+  pj <- if (.has_arms(pj)) {
+    pj |>
+      dplyr::inner_join(r_meta, by = "scenario_id") |>
+      dplyr::mutate(ratio = full / naive,
+                    n_pp = factor(n_pp, levels = sort(unique(n_pp))))
+  } else {
+    tibble::tibble(x = numeric(), ratio = numeric(), n_pp = factor())
+  }
+  gJ <- ggplot2::ggplot(pj, ggplot2::aes(x, ratio, colour = n_pp)) +
+    ggplot2::geom_hline(yintercept = 1, linetype = "dashed",
+                        colour = "#6b6b6b") +
     ggplot2::geom_line(linewidth = 0.5) +
-    ggplot2::scale_colour_manual(values = .fig_model_cols) +
-    ggplot2::expand_limits(y = 0) +
-    ggplot2::labs(title = "J  Pure null: premium vs DiD studies (R)",
-                  x = "DiD studies (20 PP throughout)",
-                  y = expression("Mean 90% CrI width for " * mu[theta])) +
+    ggplot2::geom_point(size = 1.6) +
+    # ordered quantity -> sequential ramp, not categorical hues
+    ggplot2::scale_colour_manual(values = c("#9ECAE1", "#4292C6", "#08519C"),
+                                 name = "PP studies") +
+    ggplot2::labs(title = "F  Pure null: interval premium (R)",
+                  x = "DiD studies",
+                  y = "90% CrI width, full / naive") +
     .fig_theme()
 
   # --- K/L: bias over the trend plane (Q) ---------------------------------
@@ -587,7 +566,8 @@ plot_paper_figure <- function(all_agg) {
   pq <- te |>
     dplyr::filter(scenario_id %in% q_ids) |>
     dplyr::left_join(q_xy, by = "scenario_id")
-  q_lim <- max(abs(pq$mean_bias), na.rm = TRUE)
+  q_lim <- suppressWarnings(max(abs(pq$mean_bias), na.rm = TRUE))
+  if (!is.finite(q_lim) || q_lim <= 0) q_lim <- 1  # empty/absent Q category
 
   .plane <- function(arm, ttl, slope) {
     ggplot2::ggplot(dplyr::filter(pq, model_label == arm),
@@ -604,9 +584,66 @@ plot_paper_figure <- function(all_agg) {
       ggplot2::theme(panel.grid = ggplot2::element_blank(),
                      legend.position = "right")
   }
-  gK <- .plane("full",  "K  Trend plane: full model bias (Q)",  1)
-  gL <- .plane("naive", "L  Trend plane: naive model bias (Q)", 0)
+  gK <- .plane("full",  "G  Trend plane: full model bias (Q)",  1)
+  gL <- .plane("naive", "H  Trend plane: naive model bias (Q)", 0)
 
-  patchwork::wrap_plots(gA, gB, gC, gD, gE, gF, gG, gH, gI, gJ, gK, gL,
-                        ncol = 2)
+  # --- M: which model to use, over the trend plane (Q) --------------------
+  # K and L collapsed into a decision map. A cell is "neither usable" when
+  # even the better of the two models is biased by more than `tol` -- there,
+  # the PP studies carry no usable information about theta and the fallback
+  # is a DiD-only analysis, which differences out its own trend and so is
+  # unbiased anywhere on this plane.
+  q_tol_frac <- 0.10   # tolerable |bias| as a fraction of the true effect
+  q_tol <- q_tol_frac * stats::median(abs(pq$true_value), na.rm = TRUE)
+  pm <- pq |>
+    dplyr::select(scenario_id, model_label, mean_bias, x, y) |>
+    tidyr::pivot_wider(names_from = model_label, values_from = mean_bias)
+  pm <- if (.has_arms(pm)) {
+    dplyr::mutate(pm, region = dplyr::case_when(
+      pmin(abs(full), abs(naive)) > q_tol ~ "Neither usable: drop PP",
+      abs(full) <= abs(naive)             ~ "Full model better",
+      TRUE                                ~ "Naive model better"
+    ))
+  } else {
+    tibble::tibble(x = numeric(), y = numeric(), region = character())
+  }
+  gM <- ggplot2::ggplot(pm, ggplot2::aes(x, y, fill = region)) +
+    ggplot2::geom_tile(colour = "white", linewidth = 0.4) +
+    ggplot2::geom_abline(slope = 1, intercept = 0, colour = "#111111",
+                         linewidth = 0.6) +
+    ggplot2::geom_hline(yintercept = 0, colour = "#111111", linewidth = 0.6) +
+    ggplot2::scale_fill_manual(values = c(
+      "Full model better"       = "#0072B2",
+      "Naive model better"      = "#D55E00",
+      "Neither usable: drop PP" = "#4d4d4d"), name = NULL) +
+    ggplot2::coord_fixed() +
+    ggplot2::labs(
+      title = "I  Which model to use (Q)",
+      subtitle = sprintf("'neither' = best available |bias| > %.0f%% of the true effect",
+                         100 * q_tol_frac),
+      x = expression(mu[beta]^{DiD} * " (normalised)"),
+      y = expression(mu[beta]^{PP} * " (normalised)")) +
+    .fig_theme() +
+    ggplot2::theme(panel.grid = ggplot2::element_blank(),
+                   plot.subtitle = ggplot2::element_text(size = 7,
+                                                         colour = "#5c5c5c"))
+
+  list(A = gA,   # calibration (A/F)
+       B = gB,   # trend-mean sweep, bias (J)
+       C = gC,   # trend-variability sweep, coverage (M)
+       D = gI,   # trend-variability sweep, RMSE (M)
+       E = gD,   # information from incomplete designs (K)
+       F = gJ,   # pure-null interval premium (R)
+       G = gK,   # trend plane, full model bias (Q)
+       H = gL,   # trend plane, naive model bias (Q)
+       I = gM)   # trend plane, which model to use (Q)
+}
+
+#' Multi-panel paper figure from aggregated results
+#'
+#' @param all_agg Aggregated results tibble (scenario x model x parameter).
+#' @return A patchwork object (9 panels, 5 x 2).
+plot_paper_figure <- function(all_agg) {
+  p <- paper_panels(all_agg)
+  patchwork::wrap_plots(p[LETTERS[1:9]], ncol = 2)
 }

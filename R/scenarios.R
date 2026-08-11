@@ -1680,41 +1680,6 @@ scenario_ids <- function(prefix) {
 }
 
 # ---------------------------------------------------------------------------
-# Category M: third, nested arm (figure panels C and I)
-#
-# M already sweeps the right axis for the "cost of an unnecessary variance
-# component" question: mu_beta = 0 throughout, only sigma_beta varies. What it
-# lacked was the middle rung of the nested ladder:
-#
-#   naive  mu_beta = 0,    sigma_beta = 0     0 free trend parameters
-#   homog  mu_beta free,   sigma_beta = 0     1
-#   hier   mu_beta free,   sigma_beta free    2   (the existing "full" arm)
-#
-# At sigma_beta = 0 the truth has no trend at all, so `naive` is exactly
-# correct and each extra parameter has a price that can be read off directly:
-# naive -> homog is the cost of allowing a trend level, homog -> hier is the
-# cost of falsely allowing trend VARIABILITY. The old full-vs-naive contrast
-# jumps both rungs at once and so can never separate them.
-#
-# metadid's `time_trend` switch offers only "pooled" and "fixed_zero", so there
-# is no built-in sigma_beta = 0 model; we emulate one by pinning the
-# time_trend_sd prior at ~0 (default is cauchy(5), i.e. very heavy-tailed).
-# ---------------------------------------------------------------------------
-for (.id in grep("^M\\d", names(SCENARIO_CONFIGS), value = TRUE)) {
-  SCENARIO_CONFIGS[[.id]]$compare <- c(
-    SCENARIO_CONFIGS[[.id]]$compare,
-    list(list(
-      label  = "homog",
-      fn     = "meta_did",
-      priors = metadid::set_priors(
-        time_trend_sd = metadid::normal(0, 0.001)
-      )
-    ))
-  )
-}
-rm(.id)
-
-# ---------------------------------------------------------------------------
 # Category Q: trend-plane grid (figure panels K and L)
 #
 # Every N and O scenario fixes did_trend = -0.04, so the whole published
@@ -1758,16 +1723,26 @@ rm(.i, .did, .pp)
 # Category R: how many DiD studies buy back the premium (figure panel J)
 #
 # The pure null -- mu_beta = 0 AND sigma_beta = 0, so there is no trend at all
-# and the naive model is exactly correct. Sweeping the number of DiD studies
-# with n_pp held fixed shows how the full model's interval premium decays as
-# more studies anchor the trend it insists on estimating. Note total N grows
-# along the sweep, so both models tighten; the full/naive RATIO is the part
-# that controls for that.
+# and the naive model is exactly correctly specified. A grid over the number of
+# DiD studies (which identify the trend) crossed with the number of PP studies
+# (which need it borrowed) -- panel J plots the full/naive interval RATIO, so
+# the growing total N cancels and what is left is the premium itself.
+#
+# NOTE this is the best case for the full model: with sigma_beta = 0 every DiD
+# study reads the same trend, so it is learned as fast as possible. Under
+# heterogeneous trends more DiD studies would be needed for the same premium.
 # ---------------------------------------------------------------------------
-for (.n in c(2L, 5L, 10L, 15L, 20L, 30L)) {
-  SCENARIO_CONFIGS[[paste0("R", .n)]] <- scenario(
-    sprintf("Figure panel J: pure null (no trend), %d DiD + 20 PP", .n),
-    dgp = list(n_did = .n, n_pp = 20L, true_trend = 0, sigma_trend = 0),
+R_GRID <- expand.grid(
+  n_did = c(2L, 5L, 10L, 15L, 20L, 30L),
+  n_pp  = c(5L, 20L, 50L)
+)
+
+for (.i in seq_len(nrow(R_GRID))) {
+  .nd <- R_GRID$n_did[.i]
+  .np <- R_GRID$n_pp[.i]
+  SCENARIO_CONFIGS[[paste0("R", .i)]] <- scenario(
+    sprintf("Figure panel J: pure null (no trend), %d DiD + %d PP", .nd, .np),
+    dgp = list(n_did = .nd, n_pp = .np, true_trend = 0, sigma_trend = 0),
     compare = list(
       list(label = "full",  fn = "meta_did"),
       list(label = "naive", fn = "meta_did_general",
@@ -1775,301 +1750,4 @@ for (.n in c(2L, 5L, 10L, 15L, 20L, 30L)) {
     )
   )
 }
-rm(.n)
-
-# TRUE if a scenario fits any individual-level data — either directly
-# (fit$data_format) or via a compare arm. Individual-data fits are markedly
-# slower, so the pipeline runs them at a reduced replication count.
-scenario_is_individual <- function(s) {
-  cfg <- SCENARIO_CONFIGS[[s]]
-  isTRUE(cfg$fit$data_format == "individual") ||
-    (!is.null(cfg$compare) &&
-       any(vapply(cfg$compare,
-                  function(a) isTRUE(a$data_format == "individual"),
-                  logical(1))))
-}
-
-scenario_lookup <- function() {
-  tibble::tibble(
-    scenario_id = names(SCENARIO_CONFIGS),
-    description = purrr::map_chr(SCENARIO_CONFIGS, "description")
-  )
-}
-
-# ---------------------------------------------------------------------------
-# Expected deviations registry
-#
-# Some scenarios (or specific comparison arms / parameters) are DESIGNED to
-# show bias, under-coverage, or convergence trouble: deliberate misspecification
-# demonstrations, boundary/degenerate parameter values, or normalisation stress
-# tests. Their deviations are not defects, so the executive summary separates
-# them from genuine issues instead of burying real problems in the same list.
-#
-# A registry row matches a flagged result when `scenario_id` is equal and
-# `model_label` / `parameter` are either NA (wildcard = any) or equal to the
-# flagged row's value.
-# ---------------------------------------------------------------------------
-
-scenario_expectations <- function() {
-  tibble::tribble(
-    ~scenario_id, ~model_label,       ~parameter,             ~reason,
-    # --- Deliberate misspecification: a wrong/naive model fitted on purpose ---
-    "B1", "naive",            NA,                     "Naive arm zeros a large PP time trend — misspecified by design ('full should win')",
-    "B3", "full",             NA,                     "Demonstrates pooled-trend failure when trends differ by design ('naive wins')",
-    "B3", "naive",            NA,                     "Naive comparison arm — misspecified by design",
-    # RCT baseline imbalance is not per-study identifiable (one post obs per arm);
-    # the full model leans on the hierarchical prior informed by the few DiD
-    # studies, so under-coverage here is the demonstrated identification limit.
-    "B5", "full",             NA,                     "RCT baseline imbalance not per-study identifiable; full model relies on hierarchical borrowing from few DiD — under-coverage expected",
-    "B5", "naive",            NA,                     "Naive arm ignores RCT baseline imbalance — biased by design",
-    "B6", "full",             NA,                     "Shared baseline-difference hierarchy is dominated by the larger DiD imbalance and mis-applies it to RCT — bias expected by design",
-    "B6", "naive",            NA,                     "Naive arm ignores baseline imbalance — biased by design",
-    "H1", "naive",            NA,                     "Naive arm — misspecified by design",
-    "H2", "naive",            NA,                     "Naive arm — misspecified by design",
-    "H3", "naive",            NA,                     "Naive arm — misspecified by design",
-    "H4", NA,                 NA,                     "Trend confounded with study size and design (DiD small, PP large); the pooled-trend model cannot separate them — all arms biased by design",
-    "C1", "normal",           NA,                     "Normal heterogeneity fitted to outlier-contaminated truth — inflation expected (robust arm is the calibrated one)",
-    "C2", "normal",           NA,                     "Normal fit to heavy-tailed/contaminated truth — expected (see robust arm)",
-    "C3", "normal",           NA,                     "Normal fit to heavy-tailed/contaminated truth — expected (see robust arm)",
-    "C4", "normal",           NA,                     "Normal fit to heavy-tailed/contaminated truth — expected (see robust arm)",
-    "C5", "normal",           NA,                     "Normal fit to heavy-tailed/contaminated truth — expected (see robust arm)",
-    # Asymmetric (one-directional) contamination shifts the population mean even
-    # under robust heterogeneity, so BOTH arms are expected to fail here.
-    "C6", NA,                 NA,                     "One-directional contamination shifts the mean even under robust heterogeneity — both arms biased by design",
-    "C7", "normal",           NA,                     "Normal fit to heavy-tailed/contaminated truth — expected (see robust arm)",
-    "C8", "normal",           NA,                     "Normal fit to heavy-tailed/contaminated truth — expected (see robust arm)",
-    "D4", NA,                 NA,                     "Effect correlated with sample size — informative-sampling misspecification demo",
-    "D5", NA,                 NA,                     "baseline_imbalance = fixed_zero on real imbalance — misspecification demo",
-    "I5", "without_modelled", NA,                     "Multiplier omitted when truth has it — misspecification demo",
-    "I5", "without_raw",      NA,                     "Multiplier omitted when truth has it — misspecification demo",
-    # --- Boundary / degenerate parameter values ---
-    "E2", NA,                 "treatment_effect_sd",  "Zero true heterogeneity (SD = 0 boundary) — a positive-constrained SD cannot cover it",
-    "E2", NA,                 "time_trend_sd",        "Zero true heterogeneity (SD = 0 boundary) — a positive-constrained SD cannot cover it",
-    "E5", NA,                 NA,                     "One study per design — between-study heterogeneity is unidentified by construction",
-    # --- Deliberate normalisation (Jensen) stress tests ---
-    "G8", NA,                 NA,                     "Jensen's test: large baseline_sd deliberately stresses the normalisation nonlinearity",
-    "G9", NA,                 NA,                     "Jensen's test: high within-study precision deliberately stresses the normalisation nonlinearity"
-  ) |>
-    # --- Figure-sweep categories (J-N): arms misspecified by design ---
-    dplyr::bind_rows(
-      tibble::tibble(
-        scenario_id = scenario_ids("J"), model_label = "naive",
-        parameter = NA_character_,
-        reason = "Naive arm zeros the swept time trend - misspecified by design (figure panel B)"
-      ),
-      tibble::tibble(
-        scenario_id = scenario_ids("M"), model_label = "naive",
-        parameter = NA_character_,
-        reason = "Naive arm ignores swept zero-mean trend variability - miscalibration expected by design (figure panel C)"
-      ),
-      tibble::tibble(
-        scenario_id = scenario_ids("L"), model_label = "normal",
-        parameter = NA_character_,
-        reason = "Normal heterogeneity fitted to outlier-contaminated truth - expected (figure panel E; robust arm is the calibrated one)"
-      ),
-      tibble::tibble(
-        scenario_id = scenario_ids("N"), model_label = NA_character_,
-        parameter = NA_character_,
-        reason = "Trend exchangeability deliberately violated - bias expected in both arms, bounded for the full model (figure panel F)"
-      ),
-      tibble::tibble(
-        scenario_id = scenario_ids("O"), model_label = NA_character_,
-        parameter = NA_character_,
-        reason = "Crossover sweep deliberately violates trend exchangeability on both sides of the matched point (figure panel G)"
-      ),
-      tibble::tibble(
-        scenario_id = scenario_ids("P"), model_label = NA_character_,
-        parameter = NA_character_,
-        reason = "RCT imbalance sweep: naive arm misspecified by design; full arm only partially identifies imbalance (figure panel H)"
-      ),
-      tibble::tibble(
-        scenario_id = "M1", model_label = NA_character_,
-        parameter = c("time_trend_sd"),
-        reason = "Zero true trend heterogeneity (SD = 0 boundary) - a positive-constrained SD cannot cover it"
-      )
-    )
-}
-
-# Annotate a data frame of flagged results (must contain scenario_id,
-# model_label, parameter) with `expected` (logical) and `reason` (chr),
-# resolved against scenario_expectations() with NA-as-wildcard matching.
-tag_expectations <- function(flagged) {
-  reg <- scenario_expectations()
-  hits <- purrr::pmap(
-    list(flagged$scenario_id, flagged$model_label, flagged$parameter),
-    function(sid, lab, par) {
-      m <- reg[reg$scenario_id == sid &
-                 (is.na(reg$model_label) | reg$model_label == lab) &
-                 (is.na(reg$parameter)   | reg$parameter   == par), ]
-      if (nrow(m) == 0) c(expected = FALSE, reason = NA_character_)
-      else c(expected = TRUE, reason = m$reason[[1]])
-    }
-  )
-  flagged$expected <- vapply(hits, function(h) as.logical(h[["expected"]]), logical(1))
-  flagged$reason   <- vapply(hits, function(h) h[["reason"]], character(1))
-  flagged
-}
-
-# Format a named list of overrides as a compact key=value string,
-# omitting NULL values and collapsing to a single line.
-.fmt_overrides <- function(overrides, defaults) {
-  diffs <- overrides[!names(overrides) %in% c("type", "bespoke_fn", "covariates", "beta_cov")]
-  diffs <- Filter(function(x) !is.null(x), diffs)
-  # Keep only keys that differ from the defaults
-  diffs <- diffs[purrr::map_lgl(names(diffs), function(k) {
-    !identical(diffs[[k]], defaults[[k]])
-  })]
-  if (length(diffs) == 0) return("(defaults)")
-  paste(names(diffs), purrr::map_chr(diffs, function(v) {
-    if (is.numeric(v) && length(v) == 1) as.character(v)
-    else if (is.character(v) && length(v) == 1) v
-    else paste0("[", paste(v, collapse = ", "), "]")
-  }), sep = " = ", collapse = "; ")
-}
-
-#' Scenario summary table for a given category
-#'
-#' Returns a data frame with one row per scenario showing the description,
-#' DGP overrides from defaults, and fit overrides from defaults.
-#'
-#' @param category Character prefix, e.g. "A"
-scenario_summary_table <- function(category) {
-  ids <- stringr::str_sort(scenario_ids(category), numeric = TRUE)
-  purrr::map_dfr(ids, function(id) {
-    cfg <- SCENARIO_CONFIGS[[id]]
-    dgp_str <- .fmt_overrides(cfg$dgp, default_dgp)
-    fit_str <- .fmt_overrides(cfg$fit, default_fit)
-    tibble::tibble(
-      ID          = id,
-      Description = cfg$description,
-      `DGP overrides` = dgp_str,
-      `Fit overrides` = fit_str
-    )
-  })
-}
-
-# ---------------------------------------------------------------------------
-# Long-format scenario × model settings table
-# ---------------------------------------------------------------------------
-
-# Which programmatic comparators each category runs (see _targets.R).
-# These mirror the matrix of tar_map_rep targets and must stay in sync.
-.COMPARATOR_RULES <- list(
-  A = c("naive", "robust"),
-  B = character(),
-  C = character(),
-  D = c("naive", "robust"),
-  E = c("naive", "robust"),
-  F = c("robust"),
-  G = character(),
-  H = character(),
-  # Category I scenarios manage their own modelled/raw and with/without
-  # comparators via per-scenario `compare` blocks, so no programmatic
-  # cross-cutting comparators are added.
-  I = character()
-)
-
-# Coerce one config value (which may be NULL, a formula, a data.frame, a
-# named list of priors, a vector, or a scalar) to a single string so it can
-# sit in one CSV cell.
-.flatten_value <- function(x) {
-  if (is.null(x))                   return(NA_character_)
-  if (inherits(x, "formula"))       return(paste(deparse(x), collapse = " "))
-  if (is.data.frame(x))             return(paste0("data.frame(", paste(names(x), collapse = ","), ")"))
-  if (is.list(x))                   return(paste(deparse(x), collapse = " "))
-  if (length(x) == 0)               return(NA_character_)
-  if (length(x) > 1)                return(paste(x, collapse = ";"))
-  as.character(x)
-}
-
-# Flatten a named list (e.g. cfg$dgp or cfg$fit) into a named list of
-# single-string values, prefixing each key. `defaults` is the corresponding
-# defaults list so the column set is stable across scenarios.
-.flatten_named_list <- function(values, prefix, defaults) {
-  keys <- union(names(defaults), names(values))
-  out  <- lapply(keys, function(k) .flatten_value(values[[k]]))
-  names(out) <- paste0(prefix, "_", keys)
-  out
-}
-
-# The fixed naive model config (mirrors fit_naive.R::run_naive_rep).
-.build_naive_fit <- function(base_fit) {
-  list(
-    fn                    = "meta_did_general",
-    normalise             = base_fit$normalise,
-    robust_heterogeneity  = FALSE,
-    design_effects        = base_fit$design_effects,
-    correlated_effects    = FALSE,
-    hierarchical_rho      = base_fit$hierarchical_rho,
-    time_trend            = "fixed_zero",
-    baseline_imbalance    = "fixed_zero",
-    pp_likelihood         = default_fit$pp_likelihood,
-    covariates            = NULL,
-    provide_rho           = default_fit$provide_rho,
-    data_format           = "summary"
-  )
-}
-
-.make_settings_row <- function(scenario_id, cfg, fit_for_row, model_label) {
-  base <- list(
-    scenario_id = scenario_id,
-    category    = substr(scenario_id, 1L, 1L),
-    description = cfg$description,
-    model_label = model_label
-  )
-  dgp_flat <- .flatten_named_list(cfg$dgp, "dgp", default_dgp)
-  fit_full <- modifyList(default_fit, fit_for_row)
-  fit_flat <- .flatten_named_list(fit_full, "fit", default_fit)
-  tibble::as_tibble(c(base, dgp_flat, fit_flat))
-}
-
-#' Build a long-format table with one row per (scenario_id, model) actually run
-#'
-#' Mirrors the model-execution logic in `_targets.R`. Every scenario contributes
-#' one row per primary fit (the `compare` list, if present, expands into multiple
-#' rows), plus a "naive" row for A/D/E scenarios whose base `data_format` is not
-#' `"individual"`, plus a "robust" row for A/F/D/E scenarios whose base
-#' `correlated_effects` is not `TRUE`. G scenarios contribute only their primary
-#' fit (matching `run_g_rep`).
-#'
-#' Returned columns:
-#'   scenario_id, category, description, model_label,
-#'   dgp_*  — every key in `default_dgp` plus any scenario-specific keys,
-#'   fit_*  — every key in `default_fit` plus any scenario-specific keys
-#'           (e.g. `fit_priors` for G scenarios).
-build_scenario_settings_table <- function() {
-  rows <- list()
-  for (sid in names(SCENARIO_CONFIGS)) {
-    cfg         <- SCENARIO_CONFIGS[[sid]]
-    category    <- substr(sid, 1L, 1L)
-    comparators <- .COMPARATOR_RULES[[category]]
-    if (is.null(comparators)) comparators <- character()
-
-    # --- Primary fit(s) ---
-    if (!is.null(cfg$compare)) {
-      for (cmp in cfg$compare) {
-        merged_fit <- modifyList(cfg$fit, cmp)
-        label      <- if (!is.null(cmp$label)) cmp$label else "default"
-        rows[[length(rows) + 1L]] <- .make_settings_row(sid, cfg, merged_fit, label)
-      }
-    } else {
-      rows[[length(rows) + 1L]] <- .make_settings_row(sid, cfg, cfg$fit, "default")
-    }
-
-    # --- Naive comparator ---
-    if ("naive" %in% comparators &&
-        !isTRUE(cfg$fit$data_format == "individual")) {
-      rows[[length(rows) + 1L]] <- .make_settings_row(
-        sid, cfg, .build_naive_fit(cfg$fit), "naive"
-      )
-    }
-
-    # --- Robust comparator ---
-    if ("robust" %in% comparators &&
-        !isTRUE(cfg$fit$correlated_effects)) {
-      robust_fit <- modifyList(cfg$fit, list(robust_heterogeneity = TRUE))
-      rows[[length(rows) + 1L]] <- .make_settings_row(sid, cfg, robust_fit, "robust")
-    }
-  }
-  dplyr::bind_rows(rows)
-}
+rm(.i, .nd, .np)
