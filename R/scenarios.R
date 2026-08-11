@@ -78,7 +78,7 @@ default_fit <- list(
 # Size of the DiD core that the composition sweeps build on. Exported so the
 # panel code derives "studies added" instead of hard-coding the value.
 K_CORE <- 5L    # category K (panel B): small core, default effect heterogeneity
-S_CORE <- 10L   # category S (panel E): high effect heterogeneity
+S_CORE <- 15L   # category S (panel E): high effect heterogeneity
 
 # Helper: merge user overrides into defaults
 scenario <- function(description, dgp = list(), fit = list(),
@@ -1802,9 +1802,9 @@ S_ADDED <- c(0L, 10L, 20L, 40L, 80L)
 for (.i in seq_along(S_ADDED)) {
   .k <- S_ADDED[.i]
   SCENARIO_CONFIGS[[paste0("S", .i)]] <- scenario(
-    sprintf("Figure panel (high heterogeneity): 10 DiD + %d RCT + %d PP, sigma_effect = 0.10",
-            .k %/% 2L, .k %/% 2L),
-    dgp = list(n_did = 10L, n_rct = .k %/% 2L, n_pp = .k %/% 2L,
+    sprintf("Figure panel (high heterogeneity): %d DiD + %d RCT + %d PP, sigma_effect = 0.10",
+            S_CORE, .k %/% 2L, .k %/% 2L),
+    dgp = list(n_did = S_CORE, n_rct = .k %/% 2L, n_pp = .k %/% 2L,
                sigma_effect = 0.10)
   )
 }
@@ -1812,8 +1812,8 @@ for (.i in seq_along(S_ADDED[-1])) {
   .k <- S_ADDED[-1][.i]
   SCENARIO_CONFIGS[[paste0("S", length(S_ADDED) + .i)]] <- scenario(
     sprintf("Figure panel (high heterogeneity) reference: %d DiD, sigma_effect = 0.10",
-            10L + .k),
-    dgp = list(n_did = 10L + .k, sigma_effect = 0.10)
+            S_CORE + .k),
+    dgp = list(n_did = S_CORE + .k, sigma_effect = 0.10)
   )
 }
 rm(.i, .k)

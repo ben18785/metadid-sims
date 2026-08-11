@@ -33,13 +33,35 @@ jobs:
   # R/CmdStan/metadid setup far better than per-scenario jobs would.
   # ---------------------------------------------------------------------------
   simulate:
-    name: "Category ${{ matrix.category }}"
+    name: "Category ${{ matrix.name }}"
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    # 360 is GitHub's hard ceiling for a job on a hosted runner -- a larger
+    # value here has no effect, the job is killed at 6h either way. To go past
+    # it the work has to be split across more jobs (Q's 25 scenarios are the
+    # obvious candidate), or moved to a self-hosted runner.
+    timeout-minutes: 360
     strategy:
       fail-fast: false
       matrix:
-        category: [K, M, Q, R, S, T]
+        # Each entry names a regex over TARGET names, not a category letter,
+        # so an expensive category can be split across jobs. Q is 25 scenarios
+        # and was the critical path at ~36 min of fitting per global rep; the
+        # two chunks partition Q1-Q12 / Q13-Q25 exactly. Q_rep and Q_agg are
+        # deliberately NOT matched here -- they bind across all 25 scenarios
+        # and so can only be built in assemble, after the slices are merged.
+        include:
+          - name: K
+            regex: '^K_'
+          - name: M
+            regex: '^M_'
+          - name: Qa
+            regex: '^Q_rep_Q([1-9]|1[0-2])(_combine)?$'
+          - name: Qb
+            regex: '^Q_rep_Q(1[3-9]|2[0-5])(_combine)?$'
+          - name: R
+            regex: '^R_'
+          - name: S
+            regex: '^S_' 
     env:
       N_REPS_FIG: ${{ inputs.reps }}
     steps:
@@ -89,20 +111,25 @@ jobs:
       - name: Install metadid from local checkout
         run: R CMD INSTALL ./metadid
 
-      - name: Run targets for category ${{ matrix.category }}
+      - name: Run targets for ${{ matrix.name }}
         working-directory: metadid-sims
         run: |
           Rscript -e '
             library(targets)
-            tar_make(
-              names = tidyselect::starts_with("${{ matrix.category }}_")
-            )
+            sel <- grep("${{ matrix.regex }}",
+                        tar_manifest(callr_function = NULL)$name, value = TRUE)
+            cat("matched", length(sel), "targets\n")
+            # A regex that silently matches nothing would upload a slice with
+            # the category missing, and assemble would then re-simulate it
+            # serially. Fail loudly instead.
+            if (!length(sel)) stop("regex matched no targets")
+            tar_make(names = tidyselect::all_of(sel))
           '
 
       - name: Upload _targets store slice
         uses: actions/upload-artifact@v4
         with:
-          name: figure-store-${{ matrix.category }}
+          name: figure-store-${{ matrix.name }}
           path: |
             metadid-sims/_targets/meta/
             metadid-sims/_targets/objects/
@@ -117,7 +144,12 @@ jobs:
   assemble:
     name: Assemble figure
     needs: simulate
-    if: always()
+    # NOT always(): that also fires when the run is CANCELLED, and this job
+    # would then start a tar_make against an empty store and re-simulate every
+    # missing category serially on one runner -- the failure that burned 6h in
+    # sims.yaml run 31431550646. !cancelled() keeps the recover-from-partial-
+    # failure behaviour without the cancellation pathology.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
@@ -202,8 +234,8 @@ jobs:
 
             # Build the sweep aggregates (cached from the category jobs).
             tar_make(names = c("K_agg", "M_agg",
-                               "Q_agg", "R_agg", "S_agg", "T_agg",
-                               "paired_rmse_MT", "illustration_draws"))
+                               "Q_agg", "R_agg", "S_agg",
+                               "paired_rmse_M", "illustration_draws"))
 
             tar_source("R/scenarios.R")
             tar_source("R/plots.R")
@@ -214,8 +246,7 @@ jobs:
               mutate(tar_read(K_agg), category = "K"),
               mutate(tar_read(R_agg), category = "R"),
               mutate(tar_read(Q_agg), category = "Q"),
-              mutate(tar_read(S_agg), category = "S"),
-              mutate(tar_read(T_agg), category = "T")
+              mutate(tar_read(S_agg), category = "S")
             )
 
             all_agg <- sweeps
@@ -228,8 +259,8 @@ jobs:
             # Publication layouts: Figure 1, Figure 2, and the SI panels.
             illus <- tar_read(illustration_draws)
             readr::write_csv(illus, "output/illustration_draws.csv")
-            paired <- tar_read(paired_rmse_MT)
-            readr::write_csv(paired, "output/paired_rmse_MT.csv")
+            paired <- tar_read(paired_rmse_M)
+            readr::write_csv(paired, "output/paired_rmse_M.csv")
             f1 <- plot_figure1(all_agg, illus, paired)
             ggplot2::ggsave("output/figure1.png", f1, width = 13, height = 9,
                             dpi = 300, limitsize = FALSE)
@@ -250,7 +281,7 @@ jobs:
           path: |
             metadid-sims/output/figure_panels.csv
             metadid-sims/output/illustration_draws.csv
-            metadid-sims/output/paired_rmse_MT.csv
+            metadid-sims/output/paired_rmse_M.csv
             metadid-sims/output/figure1.png
             metadid-sims/output/figure1.pdf
             metadid-sims/output/figure2.png

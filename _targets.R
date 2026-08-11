@@ -56,6 +56,19 @@ N_REPS_INDIV <- 15L
 # reps input); raise for the final run.
 N_REPS_FIG <- as.integer(Sys.getenv("N_REPS_FIG", "5"))
 
+# Category M feeds panel F, which plots an RMSE RATIO -- a second-moment
+# statistic whose Monte Carlo error is ~1/sqrt(2n): about 32% at 5 reps,
+# against ~8% for the posterior-SD and interval-width panels, which are means.
+# At 5 reps that panel is unreadable while the others are fine.
+#
+# M is also the cheapest category to run (~2.2 min of fitting per rep vs ~7.2
+# for Q), so it can take roughly 3x the reps and still finish inside Q's
+# shadow. 3x is chosen as the largest multiplier that keeps M OFF the critical
+# path at any global rep count -- so raising N_REPS_FIG for the camera-ready
+# run does not make M the binding constraint or push it into the 300-minute
+# job timeout ahead of Q.
+N_REPS_FIG_M <- 3L * N_REPS_FIG
+
 # ---------------------------------------------------------------------------
 # Source R files
 # ---------------------------------------------------------------------------
@@ -411,13 +424,13 @@ list(
   ),
   tar_target(L_agg, aggregate_scenario(L_rep)),
 
-  # ---- Category M: figure sweep (panel C; reduced reps) ----
+  # ---- Category M: figure sweep (panels C and F; extra reps) ----
   tarchetypes::tar_map_rep(
     name    = M_rep,
     command = run_one_rep(scenario_id, config, targets::tar_seed_get(), metadid_src),
     values  = scenario_values(scenario_ids("M")),
     names   = tidyselect::any_of("scenario_id"),
-    batches = N_REPS_FIG,
+    batches = N_REPS_FIG_M,
     reps    = 1
   ),
   tar_target(M_agg, aggregate_scenario(M_rep)),
@@ -488,14 +501,12 @@ list(
   ),
   tar_target(T_agg, aggregate_scenario(T_rep)),
 
-  # ---- Paired full/naive RMSE contrast for panel F ----
+  # ---- Paired metadid/naive RMSE contrast for panel F ----
   # Computed from rep-level data, not from the aggregates: both arms share a
   # simulated dataset within a replicate, and resampling replicates keeps that
-  # pairing (see paired_rmse_ratio()).
-  tar_target(
-    paired_rmse_MT,
-    dplyr::bind_rows(paired_rmse_ratio(M_rep), paired_rmse_ratio(T_rep))
-  ),
+  # pairing (see paired_rmse_ratio()). M only -- referencing T_rep here would
+  # silently pull the whole T category into any build of this target.
+  tar_target(paired_rmse_M, paired_rmse_ratio(M_rep)),
 
   # ---- Category S: composition sweep, high effect heterogeneity ----
   tarchetypes::tar_map_rep(

@@ -18,14 +18,17 @@
 library(metadid)
 
 run_illustration <- function(seed = 495L, n_studies = 20L,
-                             sigma_effect = 0.08, pkg = NULL) {
+                             sigma_effect = 0.08, true_trend = -0.15,
+                             pkg = NULL) {
   # `pkg` is a dependency-tracking sentinel, not data. Check the type first so
   # a mis-bound positional argument fails with a message that names the cause.
   stopifnot(
     "n_studies must be a single even number" =
       is.numeric(n_studies) && length(n_studies) == 1L && n_studies %% 2 == 0,
     "sigma_effect must be a single number" =
-      is.numeric(sigma_effect) && length(sigma_effect) == 1L
+      is.numeric(sigma_effect) && length(sigma_effect) == 1L,
+    "true_trend must be a single number" =
+      is.numeric(true_trend) && length(true_trend) == 1L
   )
   half <- n_studies %/% 2L
   dgp <- list(
@@ -34,7 +37,7 @@ run_illustration <- function(seed = 495L, n_studies = 20L,
     n_treatment   = 100L,
     true_effect   = -0.15,
     sigma_effect  = sigma_effect,
-    true_trend    = -0.10,
+    true_trend    = true_trend,
     sigma_trend   = 0.01,
     baseline_mean = 0.45,
     baseline_sd   = 0.02,
@@ -88,5 +91,5 @@ run_illustration <- function(seed = 495L, n_studies = 20L,
   }) |>
     dplyr::mutate(truth = truth, seed = seed,
                   n_studies = n_studies, half = half,
-                  sigma_effect = sigma_effect)
+                  sigma_effect = sigma_effect, true_trend = true_trend)
 }

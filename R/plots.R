@@ -513,17 +513,15 @@ paper_panels <- function(all_agg, paired = NULL) {
   # much more sharply than interval width shows it (naive/full RMSE reaches
   # ~5x on this sweep vs ~1.5x on width). Ignoring genuine between-study
   # trend variation propagates that variation straight into mu_theta.
-  # Full/naive RMSE ratio, paired per replicate where `paired` is supplied
+  # metadid/naive RMSE ratio, paired per replicate where `paired` is supplied
   # (see paired_rmse_ratio()); otherwise falls back to the ratio of separately
   # aggregated RMSEs so a bare figure_panels.csv still renders locally.
-  # Two lines: M is 15 DiD + 15 PP, T is 5 DiD + 25 PP. The more the evidence
-  # base leans on PP studies, the earlier ignoring trend variation costs you.
-  f_ids <- c(scenario_ids("M"), scenario_ids("T"))
+  # One composition only (M: 15 DiD + 15 PP) -- the PP-heavy T sweep was not
+  # resolvable at the replication counts in use, so it is not shown.
+  f_ids <- scenario_ids("M")
   f_meta <- purrr::map_dfr(f_ids, function(id) {
-    d <- SCENARIO_CONFIGS[[id]]$dgp
     tibble::tibble(scenario_id = id,
-                   x = d$sigma_trend / 0.02,
-                   composition = sprintf("%d DiD + %d PP", d$n_did, d$n_pp))
+                   x = SCENARIO_CONFIGS[[id]]$dgp$sigma_trend / 0.02)
   })
   pi_ <- if (!is.null(paired) && nrow(paired)) {
     paired |> dplyr::inner_join(f_meta, by = "scenario_id")
@@ -539,19 +537,17 @@ paper_panels <- function(all_agg, paired = NULL) {
         dplyr::inner_join(f_meta, by = "scenario_id")
     } else {
       tibble::tibble(x = numeric(), ratio = numeric(), lo = numeric(),
-                     hi = numeric(), composition = character())
+                     hi = numeric())
     }
   }
-  gI <- ggplot2::ggplot(pi_, ggplot2::aes(x, ratio, colour = composition)) +
+  gI <- ggplot2::ggplot(pi_, ggplot2::aes(x, ratio)) +
     ggplot2::geom_hline(yintercept = 1, linetype = "dashed",
                         colour = "#6b6b6b") +
-    ggplot2::geom_ribbon(ggplot2::aes(ymin = lo, ymax = hi, fill = composition),
+    ggplot2::geom_ribbon(ggplot2::aes(ymin = lo, ymax = hi), fill = "#0072B2",
                          alpha = 0.15, colour = NA, na.rm = TRUE) +
-    ggplot2::geom_line(linewidth = 0.5) +
-    ggplot2::geom_point(size = 1.6) +
-    ggplot2::scale_colour_manual(values = c("#0072B2", "#CC79A7"),
-                                 name = NULL, aesthetics = c("colour", "fill")) +
-    ggplot2::labs(title = "D  Variable trends, zero mean: RMSE ratio (M, T)",
+    ggplot2::geom_line(linewidth = 0.5, colour = "#0072B2") +
+    ggplot2::geom_point(size = 1.6, colour = "#0072B2") +
+    ggplot2::labs(title = "D  Variable trends, zero mean: RMSE ratio (M)",
                   x = expression(tau[beta] * " (multiples of default), " *
                                    mu[beta] * " = 0"),
                   y = "RMSE of metadid / naive") +
@@ -643,10 +639,14 @@ paper_panels <- function(all_agg, paired = NULL) {
     dplyr::select(scenario_id, model_label, mean_bias, x, y) |>
     tidyr::pivot_wider(names_from = model_label, values_from = mean_bias)
   pm <- if (.has_arms(pm)) {
+    # Four regions, not three. Where BOTH models are inside tolerance the
+    # honest answer is that the choice does not matter -- collapsing that into
+    # "metadid better" on a hair's-breadth difference overstates the case.
     dplyr::mutate(pm, region = dplyr::case_when(
-      pmin(abs(full), abs(naive)) > q_tol ~ "Neither usable: drop PP",
-      abs(full) <= abs(naive)             ~ "metadid better",
-      TRUE                                ~ "naive better"
+      pmax(abs(full), abs(naive)) <= q_tol ~ "Either works",
+      pmin(abs(full), abs(naive)) >  q_tol ~ "Neither usable: drop PP",
+      abs(full) <= abs(naive)              ~ "metadid better",
+      TRUE                                 ~ "naive better"
     ))
   } else {
     tibble::tibble(x = numeric(), y = numeric(), region = character())
@@ -657,14 +657,15 @@ paper_panels <- function(all_agg, paired = NULL) {
                          linewidth = 0.6) +
     ggplot2::geom_hline(yintercept = 0, colour = "#111111", linewidth = 0.6) +
     ggplot2::scale_fill_manual(values = c(
+      "Either works"            = "#009E73",
       "metadid better"          = "#0072B2",
       "naive better"            = "#D55E00",
-      "Neither usable: drop PP" = "#4d4d4d"), name = NULL) +
+      "Neither usable: drop PP" = "#4d4d4d"),
+      breaks = c("Either works", "metadid better", "naive better",
+                 "Neither usable: drop PP"), name = NULL) +
     ggplot2::coord_fixed() +
     ggplot2::labs(
       title = "I  Which model to use (Q)",
-      subtitle = sprintf("'neither' = best available |bias| > %.0f%% of the true effect",
-                         100 * q_tol_frac),
       x = "Mean time trend, DiD (normalised)",
       y = "Mean time trend, pre-post (normalised)") +
     .fig_theme() +
@@ -741,7 +742,12 @@ illustration_panels <- function(draws) {
                    unname(nm))
   d <- draws |> dplyr::mutate(model = unname(lab[model]))
 
-  mk <- function(models, ttl) {
+  # Shared x range across BOTH panels, computed from every arm, so the split
+  # and pooled panels can be compared directly rather than each self-scaling.
+  xr <- range(d$draw, na.rm = TRUE)
+  xr <- xr + c(-1, 1) * 0.04 * diff(xr)
+
+  mk <- function(models, ttl, legend_rows = 1L) {
     dd <- d |> dplyr::filter(model %in% unname(lab[models])) |>
       dplyr::mutate(model = factor(model, levels = unname(lab[models])))
     ggplot2::ggplot(dd, ggplot2::aes(draw, colour = model, fill = model)) +
@@ -750,13 +756,19 @@ illustration_panels <- function(draws) {
                           colour = "#1a1a1a") +
       ggplot2::scale_colour_manual(values = cols) +
       ggplot2::scale_fill_manual(values = cols) +
+      ggplot2::coord_cartesian(xlim = xr) +
+      # Three long series labels overflow a single row at panel width.
+      ggplot2::guides(
+        colour = ggplot2::guide_legend(nrow = legend_rows),
+        fill   = ggplot2::guide_legend(nrow = legend_rows)) +
       ggplot2::labs(title = ttl,
                     x = expression("Population treatment effect " *
                                      mu[theta] * " (normalised)"),
                     y = NULL) +
       .fig_theme() +
       ggplot2::theme(axis.text.y = ggplot2::element_blank(),
-                     axis.ticks.y = ggplot2::element_blank())
+                     axis.ticks.y = ggplot2::element_blank(),
+                     legend.text = ggplot2::element_text(size = 7.5))
   }
   list(
     split  = mk(c("did_half_full", "pp_half_naive"),
@@ -765,7 +777,7 @@ illustration_panels <- function(draws) {
     # oracle. The DiD-half-alone arm carries panel A and is left out here so
     # the comparison that matters -- pooled vs oracle -- is not crowded.
     pooled = mk(c("mixed_full", "mixed_naive", "did_all_full"),
-                "Pooling the designs")
+                "Pooling the designs", legend_rows = 2L)
   )
 }
 
@@ -785,10 +797,10 @@ plot_figure1 <- function(all_agg, illustration, paired = NULL) {
   il <- illustration_panels(illustration)
   patchwork::wrap_plots(
     .retitle(il$split,  "A  Stratified inference"),
-    .retitle(p$E, expression("B  Marginal study information for low " * tau[theta])),
+    .retitle(p$E, expression(bold("B  Marginal study information for low ") * bold(tau[theta]))),
     .retitle(p$F, "C  Zero time trends"),
     .retitle(il$pooled, "D  Pooled inference"),
-    .retitle(p$S, expression("E  Marginal study information for high " * tau[theta])),
+    .retitle(p$S, expression(bold("E  Marginal study information for high ") * bold(tau[theta]))),
     .retitle(p$D, "F  Mean zero time trends"),
     ncol = 3
   )
