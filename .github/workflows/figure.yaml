@@ -235,7 +235,7 @@ jobs:
             # Build the sweep aggregates (cached from the category jobs).
             tar_make(names = c("K_agg", "M_agg",
                                "Q_agg", "R_agg", "S_agg",
-                               "paired_rmse_M", "illustration_draws"))
+                               "paired_contrasts", "illustration_draws"))
 
             tar_source("R/scenarios.R")
             tar_source("R/plots.R")
@@ -259,19 +259,12 @@ jobs:
             # Publication layouts: Figure 1, Figure 2, and the SI panels.
             illus <- tar_read(illustration_draws)
             readr::write_csv(illus, "output/illustration_draws.csv")
-            paired <- tar_read(paired_rmse_M)
-            readr::write_csv(paired, "output/paired_rmse_M.csv")
-            f1 <- plot_figure1(all_agg, illus, paired)
-            ggplot2::ggsave("output/figure1.png", f1, width = 13, height = 9,
-                            dpi = 300, limitsize = FALSE)
-            ggplot2::ggsave("output/figure1.pdf", f1, width = 13, height = 9,
-                            limitsize = FALSE)
-            # Single row of three panels with collected legends beneath.
-            f2 <- plot_figure2(all_agg)
-            ggplot2::ggsave("output/figure2.png", f2, width = 13, height = 5,
-                            dpi = 300, limitsize = FALSE)
-            ggplot2::ggsave("output/figure2.pdf", f2, width = 13, height = 5,
-                            limitsize = FALSE)
+            paired <- tar_read(paired_contrasts)
+            readr::write_csv(paired, "output/paired_contrasts.csv")
+
+            # Rendering is deliberately a single call into R/plots.R so that a
+            # local render from the same CSVs cannot drift from CI's.
+            render_paper_figures("output")
           '
 
       - name: Upload figure artifacts
@@ -281,7 +274,7 @@ jobs:
           path: |
             metadid-sims/output/figure_panels.csv
             metadid-sims/output/illustration_draws.csv
-            metadid-sims/output/paired_rmse_M.csv
+            metadid-sims/output/paired_contrasts.csv
             metadid-sims/output/figure1.png
             metadid-sims/output/figure1.pdf
             metadid-sims/output/figure2.png

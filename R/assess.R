@@ -134,6 +134,14 @@ aggregate_scenario <- function(results) {
       rmse               = sqrt(mean(bias^2, na.rm = TRUE)),
       mean_ci_width      = mean(ci_width, na.rm = TRUE),
       mean_posterior_sd  = mean(posterior_sd, na.rm = TRUE),
+      # Monte Carlo standard errors, so the figure can carry uncertainty
+      # without going back to rep-level data. These are the MC error of the
+      # summary across replicates (sd / sqrt(n)), NOT posterior uncertainty.
+      se_bias            = sd(bias, na.rm = TRUE) / sqrt(sum(!is.na(bias))),
+      se_ci_width        = sd(ci_width, na.rm = TRUE) /
+                             sqrt(sum(!is.na(ci_width))),
+      se_posterior_sd    = sd(posterior_sd, na.rm = TRUE) /
+                             sqrt(sum(!is.na(posterior_sd))),
       # Convergence diagnostics
       max_rhat_worst     = max(max_rhat, na.rm = TRUE),
       min_ess_worst      = min(min_ess_bulk, na.rm = TRUE),
@@ -172,9 +180,12 @@ aggregate_scenario <- function(results) {
 #' @param n_boot      Paired bootstrap resamples.
 #' @param seed        Fixed for reproducibility across pipeline runs.
 #' @return Tibble: scenario_id, n_reps, ratio, lo, hi.
-paired_rmse_ratio <- function(rep_results, num = "full", den = "naive",
-                              param = "treatment_effect_mean",
-                              n_boot = 2000L, seed = 1L) {
+paired_ratio <- function(rep_results, column = "bias",
+                         stat = c("rmse", "mean"),
+                         num = "full", den = "naive",
+                         param = "treatment_effect_mean",
+                         n_boot = 2000L, seed = 1L) {
+  stat <- match.arg(stat)
   keys <- intersect(c("tar_batch", "tar_rep"), names(rep_results))
   if (!length(keys)) {
     stop("rep_results has no tar_batch/tar_rep replicate key")
@@ -182,12 +193,15 @@ paired_rmse_ratio <- function(rep_results, num = "full", den = "naive",
 
   wide <- rep_results |>
     dplyr::filter(parameter == param, model_label %in% c(num, den)) |>
-    dplyr::select(dplyr::all_of(c("scenario_id", keys, "model_label", "bias"))) |>
-    tidyr::pivot_wider(names_from = model_label, values_from = bias)
+    dplyr::select(dplyr::all_of(c("scenario_id", keys, "model_label", column))) |>
+    tidyr::pivot_wider(names_from = model_label,
+                       values_from = dplyr::all_of(column))
 
   if (!all(c(num, den) %in% names(wide))) return(tibble::tibble())
 
-  rmse_ratio <- function(a, b) sqrt(mean(a^2) / mean(b^2))
+  ratio_fn <- switch(stat,
+    rmse = function(a, b) sqrt(mean(a^2) / mean(b^2)),
+    mean = function(a, b) mean(a) / mean(b))
 
   withr::with_seed(seed, {
     wide |>
@@ -204,11 +218,11 @@ paired_rmse_ratio <- function(rep_results, num = "full", den = "naive",
         # preserves the pairing.
         boot <- vapply(seq_len(n_boot), function(i) {
           idx <- sample.int(length(a), replace = TRUE)
-          rmse_ratio(a[idx], b[idx])
+          ratio_fn(a[idx], b[idx])
         }, numeric(1))
         tibble::tibble(
           n_reps = length(a),
-          ratio  = rmse_ratio(a, b),
+          ratio  = ratio_fn(a, b),
           lo     = unname(quantile(boot, 0.05, na.rm = TRUE)),
           hi     = unname(quantile(boot, 0.95, na.rm = TRUE))
         )

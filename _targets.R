@@ -506,7 +506,14 @@ list(
   # simulated dataset within a replicate, and resampling replicates keeps that
   # pairing (see paired_rmse_ratio()). M only -- referencing T_rep here would
   # silently pull the whole T category into any build of this target.
-  tar_target(paired_rmse_M, paired_rmse_ratio(M_rep)),
+  tar_target(paired_rmse_M,  paired_ratio(M_rep, "bias", "rmse")),
+  # Panel C is a ratio of mean interval widths -- a first-moment statistic, so
+  # its interval is far tighter than panel F's RMSE ratio at the same reps.
+  tar_target(paired_width_R, paired_ratio(R_rep, "ci_width", "mean")),
+  tar_target(
+    paired_contrasts,
+    dplyr::bind_rows(paired_rmse_M, paired_width_R)
+  ),
 
   # ---- Category S: composition sweep, high effect heterogeneity ----
   tarchetypes::tar_map_rep(

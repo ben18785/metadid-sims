@@ -492,8 +492,12 @@ paper_panels <- function(all_agg, paired = NULL) {
                       relationship = "many-to-many")
   gD <- ggplot2::ggplot(pd, ggplot2::aes(added, mean_posterior_sd,
                                          colour = curve, linetype = curve)) +
-    ggplot2::geom_point(size = 1.6) +
     ggplot2::geom_line(linewidth = 0.5) +
+    # +/- 1.96 MC standard errors of the mean across replicates.
+    ggplot2::geom_pointrange(
+      ggplot2::aes(ymin = mean_posterior_sd - 1.96 * se_posterior_sd,
+                   ymax = mean_posterior_sd + 1.96 * se_posterior_sd),
+      size = 0.25, fatten = 2.4, na.rm = TRUE) +
     ggplot2::scale_colour_manual(values = c(
       "RCT + PP" = "#0072B2", "RCT only" = "#009E73",
       "PP only" = "#CC79A7", "DiD (reference)" = "#6b6b6b")) +
@@ -543,10 +547,10 @@ paper_panels <- function(all_agg, paired = NULL) {
   gI <- ggplot2::ggplot(pi_, ggplot2::aes(x, ratio)) +
     ggplot2::geom_hline(yintercept = 1, linetype = "dashed",
                         colour = "#6b6b6b") +
-    ggplot2::geom_ribbon(ggplot2::aes(ymin = lo, ymax = hi), fill = "#0072B2",
-                         alpha = 0.15, colour = NA, na.rm = TRUE) +
     ggplot2::geom_line(linewidth = 0.5, colour = "#0072B2") +
-    ggplot2::geom_point(size = 1.6, colour = "#0072B2") +
+    ggplot2::geom_pointrange(ggplot2::aes(ymin = lo, ymax = hi),
+                             colour = "#0072B2", size = 0.25, fatten = 2.4,
+                             na.rm = TRUE) +
     ggplot2::labs(title = "D  Variable trends, zero mean: RMSE ratio (M)",
                   x = expression(tau[beta] * " (multiples of default), " *
                                    mu[beta] * " = 0"),
@@ -558,29 +562,36 @@ paper_panels <- function(all_agg, paired = NULL) {
   # tighten and only the RATIO isolates what the full model actually costs.
   # 1.0 means the insurance is free. One line per PP count, because the
   # premium is driven by how much PP evidence has to lean on the borrowed
-  # trend -- not by the DiD count alone.
+  # trend -- not by the DiD count alone. Uses the paired per-replicate
+  # contrast when supplied, so the pointranges are honest MC intervals.
   r_meta <- purrr::map_dfr(scenario_ids("R"), function(id) {
     d <- SCENARIO_CONFIGS[[id]]$dgp
     tibble::tibble(scenario_id = id, x = d$n_did, n_pp = d$n_pp)
   })
-  pj <- te |>
-    dplyr::filter(scenario_id %in% r_meta$scenario_id,
-                  model_label %in% c("full", "naive")) |>
-    dplyr::select(scenario_id, model_label, mean_ci_width) |>
-    tidyr::pivot_wider(names_from = model_label, values_from = mean_ci_width)
-  pj <- if (.has_arms(pj)) {
-    pj |>
-      dplyr::inner_join(r_meta, by = "scenario_id") |>
-      dplyr::mutate(ratio = full / naive,
-                    n_pp = factor(n_pp, levels = sort(unique(n_pp))))
+  pj <- if (!is.null(paired) && nrow(paired)) {
+    paired |> dplyr::inner_join(r_meta, by = "scenario_id")
   } else {
-    tibble::tibble(x = numeric(), ratio = numeric(), n_pp = factor())
+    w <- te |>
+      dplyr::filter(scenario_id %in% r_meta$scenario_id,
+                    model_label %in% c("full", "naive")) |>
+      dplyr::select(scenario_id, model_label, mean_ci_width) |>
+      tidyr::pivot_wider(names_from = model_label, values_from = mean_ci_width)
+    if (.has_arms(w)) {
+      w |>
+        dplyr::mutate(ratio = full / naive, lo = NA_real_, hi = NA_real_) |>
+        dplyr::inner_join(r_meta, by = "scenario_id")
+    } else {
+      tibble::tibble(x = numeric(), ratio = numeric(), lo = numeric(),
+                     hi = numeric(), n_pp = numeric())
+    }
   }
+  pj <- dplyr::mutate(pj, n_pp = factor(n_pp, levels = sort(unique(n_pp))))
   gJ <- ggplot2::ggplot(pj, ggplot2::aes(x, ratio, colour = n_pp)) +
     ggplot2::geom_hline(yintercept = 1, linetype = "dashed",
                         colour = "#6b6b6b") +
     ggplot2::geom_line(linewidth = 0.5) +
-    ggplot2::geom_point(size = 1.6) +
+    ggplot2::geom_pointrange(ggplot2::aes(ymin = lo, ymax = hi), size = 0.25,
+                             fatten = 2.4, na.rm = TRUE) +
     # ordered quantity -> sequential ramp, not categorical hues
     ggplot2::scale_colour_manual(values = c("#9ECAE1", "#4292C6", "#08519C"),
                                  name = "PP studies") +
@@ -701,8 +712,12 @@ paper_panels <- function(all_agg, paired = NULL) {
                       relationship = "many-to-many")
   gS <- ggplot2::ggplot(ps, ggplot2::aes(added, mean_posterior_sd,
                                          colour = curve, linetype = curve)) +
-    ggplot2::geom_point(size = 1.6) +
     ggplot2::geom_line(linewidth = 0.5) +
+    # +/- 1.96 MC standard errors of the mean across replicates.
+    ggplot2::geom_pointrange(
+      ggplot2::aes(ymin = mean_posterior_sd - 1.96 * se_posterior_sd,
+                   ymax = mean_posterior_sd + 1.96 * se_posterior_sd),
+      size = 0.25, fatten = 2.4, na.rm = TRUE) +
     ggplot2::scale_colour_manual(values = c(
       "RCT + PP" = "#0072B2", "DiD (reference)" = "#6b6b6b")) +
     ggplot2::scale_linetype_manual(values = c(
@@ -823,4 +838,58 @@ plot_figure2 <- function(all_agg) {
     patchwork::plot_layout(guides = "collect") &
     ggplot2::theme(legend.position = "bottom",
                    legend.key.width = ggplot2::unit(1.4, "lines"))
+}
+
+# ===========================================================================
+# Figure rendering, decoupled from simulation
+# ===========================================================================
+
+#' Render Figure 1 and Figure 2 from exported CSVs
+#'
+#' The figures depend on the pipeline only through three CSVs, so plotting can
+#' be iterated on without rerunning any simulation:
+#'
+#'   figure_panels.csv      per-scenario aggregates (incl. MC standard errors)
+#'   illustration_draws.csv posterior draws for the column-1 densities
+#'   paired_contrasts.csv   paired per-replicate ratios for panels C and F
+#'
+#' Download those from a `paper-figure` run artifact into `dir`, then:
+#'
+#'   for (f in c("R/scenarios.R", "R/assess.R", "R/plots.R")) source(f)
+#'   render_paper_figures("output")
+#'
+#' figure.yaml calls this same function, so CI and local renders cannot drift.
+#'
+#' @param dir Directory holding the CSVs.
+#' @param out Directory to write figures to (defaults to `dir`).
+#' @param save Write PNG/PDF files; FALSE just returns the plot objects.
+#' @return Invisibly, a list of the two patchwork objects.
+render_paper_figures <- function(dir = "output", out = dir, save = TRUE) {
+  rd <- function(f, required = TRUE) {
+    path <- file.path(dir, f)
+    if (!file.exists(path)) {
+      if (required) stop("missing required input: ", path, call. = FALSE)
+      return(NULL)
+    }
+    readr::read_csv(path, show_col_types = FALSE)
+  }
+  agg    <- rd("figure_panels.csv")
+  illus  <- rd("illustration_draws.csv")
+  paired <- rd("paired_contrasts.csv", required = FALSE)
+
+  figs <- list(
+    figure1 = list(plot = plot_figure1(agg, illus, paired), w = 13, h = 9),
+    figure2 = list(plot = plot_figure2(agg),                w = 13, h = 5)
+  )
+  if (save) {
+    dir.create(out, showWarnings = FALSE, recursive = TRUE)
+    for (nm in names(figs)) {
+      f <- figs[[nm]]
+      ggplot2::ggsave(file.path(out, paste0(nm, ".png")), f$plot,
+                      width = f$w, height = f$h, dpi = 300, limitsize = FALSE)
+      ggplot2::ggsave(file.path(out, paste0(nm, ".pdf")), f$plot,
+                      width = f$w, height = f$h, limitsize = FALSE)
+    }
+  }
+  invisible(lapply(figs, `[[`, "plot"))
 }
