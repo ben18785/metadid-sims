@@ -116,6 +116,10 @@ jobs:
         run: |
           Rscript -e '
             library(targets)
+            # The regex is inlined as a LITERAL in both calls below. tar_make()
+            # evaluates `names` in a separate callr process, so an expression
+            # referring to a local variable (e.g. all_of(sel)) fails there with
+            # "object not found" -- the selector must be self-contained.
             sel <- grep("${{ matrix.regex }}",
                         tar_manifest(callr_function = NULL)$name, value = TRUE)
             cat("matched", length(sel), "targets\n")
@@ -123,7 +127,8 @@ jobs:
             # the category missing, and assemble would then re-simulate it
             # serially. Fail loudly instead.
             if (!length(sel)) stop("regex matched no targets")
-            tar_make(names = tidyselect::all_of(sel))
+            tar_make(names = tidyselect::matches("${{ matrix.regex }}",
+                                                 ignore.case = FALSE))
           '
 
       - name: Upload _targets store slice
