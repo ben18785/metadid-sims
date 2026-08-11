@@ -68,6 +68,7 @@ tar_source("R/fit_robust.R")
 tar_source("R/fit_naive.R")
 tar_source("R/assess.R")
 tar_source("R/plots.R")
+tar_source("R/illustration.R")
 
 # ---------------------------------------------------------------------------
 # Helper: build a standard values tibble for tar_map_rep
@@ -476,6 +477,29 @@ list(
   ),
   tar_target(R_agg, aggregate_scenario(R_rep)),
 
+  # ---- Category S: composition sweep, high effect heterogeneity ----
+  tarchetypes::tar_map_rep(
+    name    = S_rep,
+    command = run_one_rep(scenario_id, config, targets::tar_seed_get(), metadid_src),
+    values  = scenario_values(scenario_ids("S")),
+    names   = tidyselect::any_of("scenario_id"),
+    batches = N_REPS_FIG,
+    reps    = 1
+  ),
+  tar_target(S_agg, aggregate_scenario(S_rep)),
+
+  # ---- One-dataset illustration (Figure 1, column 1) ----
+  tar_target(illustration_draws, run_illustration(495L, metadid_src)),
+  tar_target(
+    illustration_csv,
+    {
+      dir.create("output", showWarnings = FALSE)
+      readr::write_csv(illustration_draws, "output/illustration_draws.csv")
+      "output/illustration_draws.csv"
+    },
+    format = "file"
+  ),
+
   # ---- Scenario lookup table ----
   tar_target(scenario_lookup_tbl, scenario_lookup()),
 
@@ -513,6 +537,10 @@ list(
   # ---- Combined results ----
   tar_target(
     all_agg,
+    # Q/R/S are figure-only categories: they are generated programmatically
+    # so sims.yaml's source grep cannot see them, which means no store slice
+    # exists and the report job would re-simulate all 52 of them serially on
+    # one runner. They are built by figure.yaml instead.
     dplyr::bind_rows(A_agg, F_agg, B_agg, C_agg, D_agg, E_agg, G_agg, H_agg,
                      I_agg, J_agg, K_agg, L_agg, M_agg, N_agg, O_agg, P_agg)
   ),
@@ -599,15 +627,19 @@ list(
     figure_data_csv,
     {
       dir.create("output", showWarnings = FALSE)
+      # Tagged by CATEGORY, not by panel position. Panel letters have already
+      # been reshuffled once as panels were added and cut; category letters are
+      # stable identity, so the figure code owns layout and this CSV does not
+      # go stale when a panel moves. Q/R/S are figure-only (see all_agg).
       panels <- dplyr::bind_rows(
-        dplyr::mutate(dplyr::bind_rows(A_agg, F_agg), panel = "A"),
-        dplyr::mutate(J_agg, panel = "B"),
-        dplyr::mutate(M_agg, panel = "C"),
-        dplyr::mutate(K_agg, panel = "D"),
-        dplyr::mutate(L_agg, panel = "E"),
-        dplyr::mutate(N_agg, panel = "F"),
-        dplyr::mutate(O_agg, panel = "G"),
-        dplyr::mutate(P_agg, panel = "H")
+        dplyr::mutate(dplyr::bind_rows(A_agg, F_agg), category = "AF"),
+        dplyr::mutate(J_agg, category = "J"),
+        dplyr::mutate(M_agg, category = "M"),
+        dplyr::mutate(K_agg, category = "K"),
+        dplyr::mutate(L_agg, category = "L"),
+        dplyr::mutate(N_agg, category = "N"),
+        dplyr::mutate(O_agg, category = "O"),
+        dplyr::mutate(P_agg, category = "P")
       ) |>
         dplyr::filter(parameter == "treatment_effect_mean")
       readr::write_csv(panels, "output/figure_panels.csv")

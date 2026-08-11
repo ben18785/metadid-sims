@@ -112,12 +112,20 @@ H the RCT baseline-imbalance sweep (the gamma analogue of B). Coverage-based
 panels are not resolved at low replication counts; raise `N_REPS_FIG` for the
 camera-ready run.
 
-```{r paper-figure}
-#| fig-height: 18
-#| fig-width: 11
+Figure 1 and Figure 2 are **not** rendered here: they need the Q/R/S
+categories, which are figure-only and deliberately excluded from the nightly
+pipeline (see `all_agg` in `_targets.R`). They are built by the `paper-figure`
+workflow and published as artifacts there. Only the supplementary panels,
+whose categories the nightly does run, appear below.
+
+Supplementary panels displaced from the main figures.
+
+```{r figure-si}
+#| fig-height: 9
+#| fig-width: 12
 #| column: screen
 #| out-width: "100%"
-plot_paper_figure(all_agg)
+plot_figure_si(all_agg)
 ```
 
 The same data are exported as `output/figure_panels.csv` (target

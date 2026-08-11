@@ -40,7 +40,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        category: [J, K, M, Q, R]
+        category: [J, K, M, Q, R, S]
     env:
       N_REPS_FIG: ${{ inputs.reps }}
     steps:
@@ -216,17 +216,20 @@ jobs:
 
             # Build the sweep aggregates (cached from the category jobs).
             tar_make(names = c("J_agg", "K_agg", "M_agg",
-                               "Q_agg", "R_agg"))
+                               "Q_agg", "R_agg", "S_agg",
+                               "illustration_draws"))
 
             tar_source("R/scenarios.R")
             tar_source("R/plots.R")
 
+            # Tagged by category, not panel position -- see _targets.R.
             sweeps <- bind_rows(
-              mutate(tar_read(J_agg), panel = "B"),
-              mutate(tar_read(M_agg), panel = "CD"),
-              mutate(tar_read(K_agg), panel = "E"),
-              mutate(tar_read(R_agg), panel = "F"),
-              mutate(tar_read(Q_agg), panel = "GHI")
+              mutate(tar_read(J_agg), category = "J"),
+              mutate(tar_read(M_agg), category = "M"),
+              mutate(tar_read(K_agg), category = "K"),
+              mutate(tar_read(R_agg), category = "R"),
+              mutate(tar_read(Q_agg), category = "Q"),
+              mutate(tar_read(S_agg), category = "S")
             )
 
             # Panel A rows from the latest published full run (if available).
@@ -235,7 +238,7 @@ jobs:
               af <- readr::read_csv("output/latest_full_agg.csv",
                                     show_col_types = FALSE) |>
                 filter(grepl("^[AF][0-9]", scenario_id)) |>
-                mutate(panel = "A")
+                mutate(category = "AF")
             }
             all_agg <- bind_rows(af, sweeps)
 
@@ -244,12 +247,24 @@ jobs:
               filter(parameter == "treatment_effect_mean") |>
               readr::write_csv("output/figure_panels.csv")
 
-            fig <- plot_paper_figure(all_agg)
-            # 9 panels at ncol = 2 -> 5 rows.
-            ggplot2::ggsave("output/paper_figure.png", fig,
-                            width = 11, height = 23, dpi = 300, limitsize = FALSE)
-            ggplot2::ggsave("output/paper_figure.pdf", fig,
-                            width = 11, height = 23, limitsize = FALSE)
+            # Publication layouts: Figure 1, Figure 2, and the SI panels.
+            illus <- tar_read(illustration_draws)
+            readr::write_csv(illus, "output/illustration_draws.csv")
+            f1 <- plot_figure1(all_agg, illus)
+            ggplot2::ggsave("output/figure1.png", f1, width = 13, height = 9,
+                            dpi = 300, limitsize = FALSE)
+            ggplot2::ggsave("output/figure1.pdf", f1, width = 13, height = 9,
+                            limitsize = FALSE)
+            f2 <- plot_figure2(all_agg)
+            ggplot2::ggsave("output/figure2.png", f2, width = 12, height = 11,
+                            dpi = 300, limitsize = FALSE)
+            ggplot2::ggsave("output/figure2.pdf", f2, width = 12, height = 11,
+                            limitsize = FALSE)
+            fsi <- plot_figure_si(all_agg)
+            ggplot2::ggsave("output/figure_si.png", fsi, width = 12, height = 9,
+                            dpi = 300, limitsize = FALSE)
+            ggplot2::ggsave("output/figure_si.pdf", fsi, width = 12, height = 9,
+                            limitsize = FALSE)
           '
 
       - name: Upload figure artifacts
@@ -258,7 +273,12 @@ jobs:
           name: paper-figure
           path: |
             metadid-sims/output/figure_panels.csv
-            metadid-sims/output/paper_figure.png
-            metadid-sims/output/paper_figure.pdf
+            metadid-sims/output/illustration_draws.csv
+            metadid-sims/output/figure1.png
+            metadid-sims/output/figure1.pdf
+            metadid-sims/output/figure2.png
+            metadid-sims/output/figure2.pdf
+            metadid-sims/output/figure_si.png
+            metadid-sims/output/figure_si.pdf
           if-no-files-found: error
           retention-days: 90

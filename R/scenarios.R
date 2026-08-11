@@ -1752,6 +1752,38 @@ for (.i in seq_len(nrow(R_GRID))) {
 }
 rm(.i, .nd, .np)
 
+# ---------------------------------------------------------------------------
+# Category S: information from incomplete designs under HIGH effect
+# heterogeneity (figure panel; K composition sweep at sigma_effect = 0.10)
+#
+# Theory (SI S3): tau_theta^2 inflates V_D and V_P equally, pushing the
+# per-study exchange rate V_D/V_P toward 1 -- incomplete designs approach
+# parity with DiD studies precisely when every study is a noisy reading of
+# the effect. This repeats the K mixed/reference sweep at sigma_effect =
+# 0.10 (default 0.03): the mixed curve should sit CLOSER to the DiD
+# reference than in K, though everything is less precise absolutely.
+# ---------------------------------------------------------------------------
+S_ADDED <- c(0L, 10L, 20L, 40L, 80L)
+
+for (.i in seq_along(S_ADDED)) {
+  .k <- S_ADDED[.i]
+  SCENARIO_CONFIGS[[paste0("S", .i)]] <- scenario(
+    sprintf("Figure panel (high heterogeneity): 10 DiD + %d RCT + %d PP, sigma_effect = 0.10",
+            .k %/% 2L, .k %/% 2L),
+    dgp = list(n_did = 10L, n_rct = .k %/% 2L, n_pp = .k %/% 2L,
+               sigma_effect = 0.10)
+  )
+}
+for (.i in seq_along(S_ADDED[-1])) {
+  .k <- S_ADDED[-1][.i]
+  SCENARIO_CONFIGS[[paste0("S", length(S_ADDED) + .i)]] <- scenario(
+    sprintf("Figure panel (high heterogeneity) reference: %d DiD, sigma_effect = 0.10",
+            10L + .k),
+    dgp = list(n_did = 10L + .k, sigma_effect = 0.10)
+  )
+}
+rm(.i, .k)
+
 # TRUE if a scenario fits any individual-level data — either directly
 # (fit$data_format) or via a compare arm. Individual-data fits are markedly
 # slower, so the pipeline runs them at a reduced replication count.

@@ -109,8 +109,8 @@ jobs:
       - id: extract
         run: |
           set -euo pipefail
-          ids=$(grep -E '^  [A-N][0-9]+ = scenario\(' R/scenarios.R \
-                | sed -E 's/^  ([A-N][0-9]+) = .*/\1/')
+          ids=$(grep -E '^  [A-S][0-9]+ = scenario\(' R/scenarios.R \
+                | sed -E 's/^  ([A-S][0-9]+) = .*/\1/')
           if [ -z "$ids" ]; then
             echo "::error::No scenario IDs found in R/scenarios.R"
             exit 1

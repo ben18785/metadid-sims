@@ -628,6 +628,47 @@ paper_panels <- function(all_agg) {
                    plot.subtitle = ggplot2::element_text(size = 7,
                                                          colour = "#5c5c5c"))
 
+  # --- S: composition sweep under high effect heterogeneity (S) -----------
+  # Same construction as the K panel, on the S grid (sigma_effect = 0.10).
+  # Only two curves exist here: the mixed RCT+PP sweep and the DiD reference.
+  s_ids <- scenario_ids("S")
+  s_info <- purrr::map_dfr(s_ids, function(id) {
+    d <- SCENARIO_CONFIGS[[id]]$dgp
+    tibble::tibble(
+      scenario_id = id,
+      added = (d$n_did - 10L) + d$n_rct + d$n_pp,
+      curve = dplyr::case_when(
+        d$n_rct > 0 & d$n_pp > 0 ~ "RCT + PP",
+        d$n_did > 10L            ~ "DiD (reference)",
+        TRUE                     ~ "core"
+      )
+    )
+  })
+  s_curves <- setdiff(unique(s_info$curve), "core")
+  s_core <- s_info |> dplyr::filter(curve == "core")
+  s_all <- dplyr::bind_rows(
+    s_info |> dplyr::filter(curve != "core"),
+    tidyr::crossing(s_core |> dplyr::select(-curve), curve = s_curves)
+  )
+  ps <- te |>
+    dplyr::filter(scenario_id %in% s_ids) |>
+    dplyr::inner_join(s_all, by = "scenario_id",
+                      relationship = "many-to-many")
+  gS <- ggplot2::ggplot(ps, ggplot2::aes(added, mean_posterior_sd,
+                                         colour = curve, linetype = curve)) +
+    ggplot2::geom_point(size = 1.6) +
+    ggplot2::geom_line(linewidth = 0.5) +
+    ggplot2::scale_colour_manual(values = c(
+      "RCT + PP" = "#0072B2", "DiD (reference)" = "#6b6b6b")) +
+    ggplot2::scale_linetype_manual(values = c(
+      "RCT + PP" = "solid", "DiD (reference)" = "dashed")) +
+    ggplot2::labs(
+      title = "Information from incomplete designs, high heterogeneity (S)",
+      x = "Studies added to a core of 10 DiD",
+      y = expression("Posterior SD of " * mu[theta])) +
+    ggplot2::expand_limits(y = 0) +
+    .fig_theme()
+
   list(A = gA,   # calibration (A/F)
        B = gB,   # trend-mean sweep, bias (J)
        C = gC,   # trend-variability sweep, coverage (M)
@@ -636,14 +677,98 @@ paper_panels <- function(all_agg) {
        F = gJ,   # pure-null interval premium (R)
        G = gK,   # trend plane, full model bias (Q)
        H = gL,   # trend plane, naive model bias (Q)
-       I = gM)   # trend plane, which model to use (Q)
+       I = gM,   # trend plane, which model to use (Q)
+       S = gS)   # composition sweep, high effect heterogeneity (S)
 }
 
-#' Multi-panel paper figure from aggregated results
+illustration_panels <- function(draws) {
+  truth <- draws$truth[1]
+  lab <- c(did25_full  = "25 DiD alone",
+           pp25_naive  = "25 PP alone (no-trend)",
+           mixed_full  = "full: 25 DiD + 25 PP",
+           mixed_naive = "naive: 25 DiD + 25 PP",
+           did50_full  = "all 50 DiD (oracle)")
+  cols <- c("25 DiD alone"           = "#5b6770",
+            "25 PP alone (no-trend)" = "#D55E00",
+            "full: 25 DiD + 25 PP"   = "#0072B2",
+            "naive: 25 DiD + 25 PP"  = "#D55E00",
+            "all 50 DiD (oracle)"    = "#1a1a1a")
+  d <- draws |> dplyr::mutate(model = unname(lab[model]))
+
+  mk <- function(models, ttl) {
+    dd <- d |> dplyr::filter(model %in% unname(lab[models])) |>
+      dplyr::mutate(model = factor(model, levels = unname(lab[models])))
+    ggplot2::ggplot(dd, ggplot2::aes(draw, colour = model, fill = model)) +
+      ggplot2::geom_density(alpha = 0.25, adjust = 1.2, linewidth = 0.6) +
+      ggplot2::geom_vline(xintercept = truth, linetype = "dashed",
+                          colour = "#1a1a1a") +
+      ggplot2::scale_colour_manual(values = cols) +
+      ggplot2::scale_fill_manual(values = cols) +
+      ggplot2::labs(title = ttl,
+                    x = expression("Population treatment effect " *
+                                     mu[theta] * " (normalised)"),
+                    y = NULL) +
+      .fig_theme() +
+      ggplot2::theme(axis.text.y = ggplot2::element_blank(),
+                     axis.ticks.y = ggplot2::element_blank())
+  }
+  list(
+    split  = mk(c("did25_full", "pp25_naive"),
+                "One dataset, split and analysed separately"),
+    pooled = mk(c("mixed_full", "mixed_naive", "did50_full", "did25_full"),
+                "Pooling the designs")
+  )
+}
+
+.retitle <- function(g, ttl) g + ggplot2::labs(title = ttl)
+
+#' Figure 1: what the method does, the value of pooling, and its safety
 #'
-#' @param all_agg Aggregated results tibble (scenario x model x parameter).
-#' @return A patchwork object (9 panels, 5 x 2).
-plot_paper_figure <- function(all_agg) {
+#' Column 1: the one-dataset illustration (split / pooled). Column 2: the
+#' composition sweep at default and high effect heterogeneity. Column 3:
+#' the pure-null interval premium and the zero-mean RMSE ratio.
+#'
+#' @param all_agg Aggregated results tibble.
+#' @param illustration Draws tibble from run_illustration().
+#' @return A patchwork object (6 panels, 2 rows x 3 columns).
+plot_figure1 <- function(all_agg, illustration) {
+  p  <- paper_panels(all_agg)
+  il <- illustration_panels(illustration)
+  patchwork::wrap_plots(
+    .retitle(il$split,  "A  One dataset, analysed separately"),
+    .retitle(p$E, "B  Information from incomplete designs (K)"),
+    .retitle(p$F, "C  Pure null: interval premium (R)"),
+    .retitle(il$pooled, "D  Pooling the designs"),
+    .retitle(p$S, "E  As B, high effect heterogeneity (S)"),
+    .retitle(p$D, "F  Variable trends, zero mean: RMSE ratio (M)"),
+    ncol = 3
+  )
+}
+
+#' Figure 2: the trend plane and the model-choice map
+#'
+#' @param all_agg Aggregated results tibble.
+#' @return A patchwork object (3 panels).
+plot_figure2 <- function(all_agg) {
   p <- paper_panels(all_agg)
-  patchwork::wrap_plots(p[LETTERS[1:9]], ncol = 2)
+  patchwork::wrap_plots(
+    .retitle(p$G, "A  Trend plane: full model bias (Q)"),
+    .retitle(p$H, "B  Trend plane: naive model bias (Q)"),
+    .retitle(p$I, "C  Which model to use (Q)"),
+    ncol = 2
+  )
+}
+
+#' Supplementary figure: panels displaced from the main figures
+#'
+#' @param all_agg Aggregated results tibble.
+#' @return A patchwork object.
+plot_figure_si <- function(all_agg) {
+  p <- paper_panels(all_agg)
+  patchwork::wrap_plots(
+    .retitle(p$A, "S1  Calibration (A/F scenarios)"),
+    .retitle(p$B, "S2  Systematic trends: bias (J)"),
+    .retitle(p$C, "S3  Variable trends, zero mean: coverage (M)"),
+    ncol = 2
+  )
 }
