@@ -62,6 +62,8 @@ jobs:
             regex: '^R_'
           - name: S
             regex: '^S_'
+          - name: V
+            regex: '^V_'
           - name: Ua
             regex: '^U_rep_U05_'
           - name: Ub
@@ -243,7 +245,8 @@ jobs:
 
             # Build the sweep aggregates (cached from the category jobs).
             tar_make(names = c("K_agg", "M_agg",
-                               "Q_agg", "R_agg", "S_agg", "U_agg",
+                               "Q_agg", "R_agg", "S_agg", "U_agg", "V_agg",
+                               "design_ratios",
                                "paired_contrasts", "illustration_draws"))
 
             tar_source("R/scenarios.R")
@@ -256,7 +259,8 @@ jobs:
               mutate(tar_read(R_agg), category = "R"),
               mutate(tar_read(Q_agg), category = "Q"),
               mutate(tar_read(S_agg), category = "S"),
-              mutate(tar_read(U_agg), category = "U")
+              mutate(tar_read(U_agg), category = "U"),
+              mutate(tar_read(V_agg), category = "V")
             )
 
             all_agg <- sweeps
@@ -271,6 +275,7 @@ jobs:
             readr::write_csv(illus, "output/illustration_draws.csv")
             paired <- tar_read(paired_contrasts)
             readr::write_csv(paired, "output/paired_contrasts.csv")
+            readr::write_csv(tar_read(design_ratios), "output/design_ratios.csv")
 
             # Rendering is deliberately a single call into R/plots.R so that
             # a local render from the same CSVs cannot drift from the CI one.
@@ -288,6 +293,7 @@ jobs:
             metadid-sims/output/figure_panels.csv
             metadid-sims/output/illustration_draws.csv
             metadid-sims/output/paired_contrasts.csv
+            metadid-sims/output/design_ratios.csv
             metadid-sims/output/figure1.png
             metadid-sims/output/figure1.pdf
             metadid-sims/output/figure2.png

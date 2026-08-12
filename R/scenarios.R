@@ -1879,6 +1879,40 @@ for (.i in seq_along(S_ADDED[-1])) {
 }
 rm(.i, .k)
 
+# ---------------------------------------------------------------------------
+# Category V: the K composition sweep at the S core size (figure panel B)
+#
+# K is (low tau_theta, small core) and S is (high tau_theta, large core), so on
+# their own they confound effect heterogeneity with core size. V is the missing
+# cell -- low tau_theta at the LARGE core -- which makes the comparison
+# attributable:
+#
+#   K vs V   core size, at fixed low tau_theta
+#   V vs S   effect heterogeneity, at fixed core of 15
+#
+# Same added-study grid as S so the three curves share an x axis.
+# ---------------------------------------------------------------------------
+V_CORE <- 15L
+
+for (.i in seq_along(S_ADDED)) {
+  .k <- S_ADDED[.i]
+  SCENARIO_CONFIGS[[paste0("V", .i)]] <- scenario(
+    sprintf("Figure panel B: %d DiD + %d RCT + %d PP, default sigma_effect",
+            V_CORE, .k %/% 2L, .k %/% 2L),
+    dgp = list(n_did = V_CORE, n_rct = .k %/% 2L, n_pp = .k %/% 2L)
+  )
+}
+for (.i in seq_along(S_ADDED[-1])) {
+  .k <- S_ADDED[-1][.i]
+  SCENARIO_CONFIGS[[paste0("V", length(S_ADDED) + .i)]] <- scenario(
+    sprintf("Figure panel B reference: %d DiD, default sigma_effect",
+            V_CORE + .k),
+    dgp = list(n_did = V_CORE + .k)
+  )
+}
+rm(.i, .k)
+
+
 # TRUE if a scenario fits any individual-level data — either directly
 # (fit$data_format) or via a compare arm. Individual-data fits are markedly
 # slower, so the pipeline runs them at a reduced replication count.

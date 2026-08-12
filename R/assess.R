@@ -230,3 +230,75 @@ paired_ratio <- function(rep_results, column = "bias",
       dplyr::ungroup()
   })
 }
+
+#' Per-design exchange rate with an unpaired bootstrap interval
+#'
+#' The exchange rate is a ratio of precision INCREMENTS,
+#'
+#'   ratio_X = (P_X - P_core) / (P_did - P_core),   P = 1 / posterior_sd^2
+#'
+#' where the four arms (core, +DiD, +RCT, +PP) are SEPARATE scenarios, run with
+#' separate seeds on separate simulated data. They therefore share no common
+#' randomness, and replicates must be resampled within each arm independently
+#' -- unlike paired_ratio(), where both arms see the same dataset and the
+#' pairing can be preserved. The resulting intervals are correspondingly wider;
+#' that is honest, not a defect.
+#'
+#' Arms whose worst R-hat exceeds `rhat_max` are dropped. Because `core` sits
+#' in the denominator of every ratio at its grid point, losing it makes that
+#' point missing rather than wrong.
+#'
+#' @param rep_results Per-replication results for the U scenarios.
+#' @param rhat_max Convergence threshold.
+#' @param n_boot Bootstrap resamples.
+#' @param seed Fixed for reproducibility.
+#' @return Tibble: anchor, rho, design, n_reps, ratio, lo, hi.
+design_exchange_rate <- function(rep_results, rhat_max = 1.05,
+                                 n_boot = 2000L, seed = 1L) {
+  d <- rep_results |>
+    dplyr::filter(parameter == "treatment_effect_mean",
+                  grepl("^U[0-9]", scenario_id))
+  if (!nrow(d)) return(tibble::tibble())
+  if ("max_rhat" %in% names(d)) d <- dplyr::filter(d, max_rhat <= rhat_max)
+
+  d <- d |>
+    dplyr::mutate(
+      anchor = as.integer(sub("^U([0-9]+)_.*$", "\\1", scenario_id)),
+      arm    = sub("^.*_", "", scenario_id),
+      rho    = vapply(scenario_id,
+                      function(i) SCENARIO_CONFIGS[[i]]$dgp$rho, numeric(1)))
+
+  # precision of one replicate
+  prec <- function(x) 1 / x^2
+
+  withr::with_seed(seed, {
+    d |>
+      dplyr::group_by(anchor, rho) |>
+      dplyr::group_modify(function(g, key) {
+        arms <- split(g$posterior_sd, g$arm)
+        need <- c("core", "did", "rct", "pp")
+        if (!all(need %in% names(arms)) ||
+            any(vapply(arms[need], length, integer(1)) < 2L)) {
+          return(tibble::tibble(design = c("RCT (post-only)", "PP"),
+                                n_reps = NA_integer_, ratio = NA_real_,
+                                lo = NA_real_, hi = NA_real_))
+        }
+        P <- lapply(arms[need], function(x) mean(prec(x)))
+        pt <- c(`RCT (post-only)` = (P$rct - P$core) / (P$did - P$core),
+                `PP`              = (P$pp  - P$core) / (P$did - P$core))
+        # resample replicates independently within each arm
+        bt <- vapply(seq_len(n_boot), function(i) {
+          B <- lapply(arms[need], function(x) mean(prec(sample(x, replace = TRUE))))
+          c((B$rct - B$core) / (B$did - B$core),
+            (B$pp  - B$core) / (B$did - B$core))
+        }, numeric(2))
+        tibble::tibble(
+          design = c("RCT (post-only)", "PP"),
+          n_reps = min(vapply(arms[need], length, integer(1))),
+          ratio  = unname(pt),
+          lo     = apply(bt, 1, stats::quantile, 0.05, na.rm = TRUE),
+          hi     = apply(bt, 1, stats::quantile, 0.95, na.rm = TRUE))
+      }) |>
+      dplyr::ungroup()
+  })
+}

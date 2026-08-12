@@ -501,6 +501,22 @@ list(
   ),
   tar_target(U_agg, aggregate_scenario(U_rep)),
 
+  # ---- Category V: K composition sweep at the S core (panel B) ----
+  tarchetypes::tar_map_rep(
+    name    = V_rep,
+    command = run_one_rep(scenario_id, config, targets::tar_seed_get(), metadid_src),
+    values  = scenario_values(scenario_ids("V")),
+    names   = tidyselect::any_of("scenario_id"),
+    batches = N_REPS_FIG,
+    reps    = 1
+  ),
+  tar_target(V_agg, aggregate_scenario(V_rep)),
+
+  # ---- Unpaired bootstrap exchange rates for the validation figures ----
+  # The four U arms are separate scenarios with separate seeds, so replicates
+  # are resampled within each arm independently (unlike paired_ratio()).
+  tar_target(design_ratios, design_exchange_rate(U_rep)),
+
   # ---- Category T: M sweep at a PP-heavy composition (panel F) ----
   tarchetypes::tar_map_rep(
     name    = T_rep,

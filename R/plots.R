@@ -578,15 +578,21 @@ paper_panels <- function(all_agg, paired = NULL, q_tol_frac = Q_TOL_FRAC) {
   }
   # Both settings differ in TWO respects -- effect heterogeneity and core size
   # -- so the legend names both explicitly rather than saying "low"/"high".
+  # Three settings, so heterogeneity and core size can be told apart:
+  #   K vs V  core size at fixed low tau_theta
+  #   V vs S  heterogeneity at fixed core of 15
   k_se <- SCENARIO_CONFIGS[[scenario_ids("K")[1]]]$dgp$sigma_effect
+  v_se <- SCENARIO_CONFIGS[[scenario_ids("V")[1]]]$dgp$sigma_effect
   s_se <- SCENARIO_CONFIGS[[scenario_ids("S")[1]]]$dgp$sigma_effect
   pd <- dplyr::bind_rows(
-    .composition("K", K_CORE, "low"),
-    .composition("S", S_CORE, "high")
+    .composition("K", K_CORE, "k"),
+    .composition("V", V_CORE, "v"),
+    .composition("S", S_CORE, "s")
   ) |>
-    dplyr::mutate(setting = factor(setting, levels = c("low", "high")))
+    dplyr::mutate(setting = factor(setting, levels = c("k", "v", "s")))
   pd_labs <- list(
     bquote(tau[theta] == .(k_se) ~ "," ~ .(K_CORE) ~ "DiD core"),
+    bquote(tau[theta] == .(v_se) ~ "," ~ .(V_CORE) ~ "DiD core"),
     bquote(tau[theta] == .(s_se) ~ "," ~ .(S_CORE) ~ "DiD core")
   )
   gD <- ggplot2::ggplot(pd, ggplot2::aes(added, mean_posterior_sd,
@@ -597,17 +603,21 @@ paper_panels <- function(all_agg, paired = NULL, q_tol_frac = Q_TOL_FRAC) {
       ggplot2::aes(ymin = mean_posterior_sd - 1.96 * se_posterior_sd,
                    ymax = mean_posterior_sd + 1.96 * se_posterior_sd),
       size = 0.35, linewidth = 0.4, na.rm = TRUE) +
-    ggplot2::scale_colour_manual(values = c(low = "#0072B2", high = "#D55E00"),
-                                 labels = pd_labs, name = NULL) +
+    ggplot2::scale_colour_manual(
+      values = c(k = "#0072B2", v = "#009E73", s = "#D55E00"),
+      labels = pd_labs, name = NULL) +
     ggplot2::scale_linetype_manual(
       values = c("RCT + PP" = "solid", "DiD (reference)" = "dashed"),
       labels = c("RCT + PP" = "mixed: RCT + PP added",
                  "DiD (reference)" = "DiD added (reference)"),
       name = NULL) +
-    ggplot2::labs(title = "B  Marginal value of incomplete designs (K, S)",
+    ggplot2::guides(colour = ggplot2::guide_legend(nrow = 2, order = 1),
+                    linetype = ggplot2::guide_legend(nrow = 2, order = 2)) +
+    ggplot2::labs(title = "B  Marginal value of incomplete designs (K, V, S)",
                   x = "Studies added to the DiD core",
                   y = expression("Posterior SD of " * mu[theta])) +
-    .fig_theme()
+    .fig_theme() +
+    ggplot2::theme(legend.text = ggplot2::element_text(size = 7.5))
 
   # --- I: efficiency over the trend-variability sweep (M) -----------------
   # Same sweep as panel C, on RMSE. mu_beta = 0 throughout, so no arm is
@@ -811,7 +821,8 @@ paper_panels <- function(all_agg, paired = NULL, q_tol_frac = Q_TOL_FRAC) {
       dplyr::mutate(anchor = factor(lab_anchor(anchor)))
     ce <- dplyr::filter(u_ceil, design %in% designs)
     g <- ggplot2::ggplot(mapping = ggplot2::aes(rho, ratio)) +
-      ggplot2::geom_hline(yintercept = 1, colour = "#dcdcdc") +
+      ggplot2::geom_hline(yintercept = 1, linetype = "dashed",
+                          colour = "#6b6b6b") +
       # ceiling: what the design would be worth if the nuisance were KNOWN
       ggplot2::geom_line(data = ce, ggplot2::aes(linetype = "nuisance known"),
                          colour = "#6b6b6b", linewidth = 0.45) +
@@ -932,12 +943,12 @@ plot_figure1 <- function(all_agg, illustration, paired = NULL,
   p  <- paper_panels(all_agg, paired, q_tol_frac)
   il <- illustration_panels(illustration)
   patchwork::wrap_plots(
-    .retitle(il$split,  "A  Stratified inference"),
-    .retitle(p$E, expression(bold("B  Marginal value of incomplete designs, low vs high ") * bold(tau[theta]))),
-    .retitle(p$F, "C  Zero time trends"),
-    .retitle(il$pooled, "D  Pooled inference"),
-    .retitle(p$U, "E  Value of each design, vs one DiD study"),
-    .retitle(p$D, "F  Mean zero time trends"),
+    .retitle(il$split,  "A  Analysed separately, the designs disagree"),
+    .retitle(p$E, "B  Incomplete designs help most with few DiD\n     studies or high effect heterogeneity"),
+    .retitle(p$F, "C  With no time trends, metadid costs little"),
+    .retitle(il$pooled, "D  Pooling with metadid estimates the effect\n     more precisely"),
+    .retitle(p$U, "E  Post-only RCTs are most informative when\n     pre-post correlation is low"),
+    .retitle(p$D, "F  With zero-mean variable trends, metadid\n     improves on naive quickly"),
     ncol = 3
   )
 }
@@ -960,9 +971,9 @@ plot_figure_si <- function(all_agg) {
 plot_figure2 <- function(all_agg, q_tol_frac = Q_TOL_FRAC) {
   p <- paper_panels(all_agg, q_tol_frac = q_tol_frac)
   patchwork::wrap_plots(
-    .retitle(p$G, "A  metadid bias"),
-    .retitle(p$H, "B  naive bias"),
-    .retitle(p$I, "C  Which model to use"),
+    .retitle(p$G, "A  metadid is unbiased when PP and DiD trends agree"),
+    .retitle(p$H, "B  Naive is unbiased only when PP trends are absent"),
+    .retitle(p$I, "C  Where each model can be trusted"),
     ncol = 3
   ) +
     # A and B share an identical fill scale, so collecting guides merges them
@@ -1009,6 +1020,7 @@ render_paper_figures <- function(dir = "output", out = dir, save = TRUE,
   agg    <- rd("figure_panels.csv")
   illus  <- rd("illustration_draws.csv")
   paired <- rd("paired_contrasts.csv", required = FALSE)
+  ratios <- rd("design_ratios.csv", required = FALSE)
 
   figs <- list(
     figure1 = list(plot = plot_figure1(agg, illus, paired, q_tol_frac),
@@ -1016,10 +1028,10 @@ render_paper_figures <- function(dir = "output", out = dir, save = TRUE,
     figure2 = list(plot = plot_figure2(agg, q_tol_frac), w = 13, h = 5),
     figure_si = list(plot = plot_figure_si(agg), w = 9, h = 4.6),
     # theory vs simulation, one per incomplete design
-    figure_val_pp  = list(plot = plot_design_validation(agg, "PP"),
+    figure_val_pp  = list(plot = plot_design_validation(agg, "PP", ratios),
                           w = 10, h = 8),
-    figure_val_rct = list(plot = plot_design_validation(agg, "RCT (post-only)"),
-                          w = 10, h = 8)
+    figure_val_rct = list(plot = plot_design_validation(agg, "RCT (post-only)",
+                                                        ratios), w = 10, h = 8)
   )
   if (save) {
     dir.create(out, showWarnings = FALSE, recursive = TRUE)
@@ -1076,7 +1088,7 @@ q_tolerance_scan <- function(all_agg, fracs = c(0.05, 0.10, 0.15, 0.20,
 #' @param all_agg Aggregated results tibble (or figure_panels.csv).
 #' @param design  "PP" or "RCT (post-only)".
 #' @return A patchwork object (4 panels, 2 x 2).
-plot_design_validation <- function(all_agg, design = "PP") {
+plot_design_validation <- function(all_agg, design = "PP", ratios = NULL) {
   te <- dplyr::filter(all_agg, parameter == "treatment_effect_mean")
   ids <- scenario_ids("U")
   meta <- .u_meta(ids)
@@ -1084,7 +1096,14 @@ plot_design_validation <- function(all_agg, design = "PP") {
   rhos <- sort(unique(meta$rho))
   arm_key <- if (design == "PP") "pp" else "rct"
 
-  meas <- dplyr::filter(.u_measured(te, ids), design == !!design)
+  # Prefer the bootstrap table (design_exchange_rate()) when supplied: it
+  # carries intervals. Fall back to point estimates from the aggregates.
+  meas <- if (!is.null(ratios) && nrow(ratios)) {
+    dplyr::filter(ratios, design == !!design)
+  } else {
+    dplyr::mutate(dplyr::filter(.u_measured(te, ids), design == !!design),
+                  lo = NA_real_, hi = NA_real_)
+  }
   th   <- dplyr::filter(.u_theory(ids, anchors), design == !!design)
   # theory evaluated AT the simulated rho values, for panel 4
   th_at <- dplyr::filter(.u_theory(ids, anchors, rho = rhos),
@@ -1093,11 +1112,14 @@ plot_design_validation <- function(all_agg, design = "PP") {
 
   by_anchor <- function(a) {
     ggplot2::ggplot(mapping = ggplot2::aes(rho, ratio)) +
-      ggplot2::geom_hline(yintercept = 1, colour = "#dcdcdc") +
+      ggplot2::geom_hline(yintercept = 1, linetype = "dashed",
+                          colour = "#6b6b6b") +
       ggplot2::geom_line(data = dplyr::filter(th, anchor == a),
                          colour = "#08519C", linewidth = 0.6) +
-      ggplot2::geom_point(data = dplyr::filter(meas, anchor == a),
-                          colour = "#111111", size = 2, na.rm = TRUE) +
+      ggplot2::geom_pointrange(
+        data = dplyr::filter(meas, anchor == a),
+        ggplot2::aes(ymin = lo, ymax = hi),
+        colour = "#111111", size = 0.35, linewidth = 0.4, na.rm = TRUE) +
       ggplot2::expand_limits(y = 0) +
       ggplot2::labs(title = sprintf("%d DiD anchor", a),
                     x = expression(rho),
@@ -1130,14 +1152,19 @@ plot_design_validation <- function(all_agg, design = "PP") {
   pvo <- meas |>
     dplyr::inner_join(th_at, by = c("rho", "anchor")) |>
     dplyr::mutate(anchor = factor(paste(anchor, "anchor")))
-  lim <- suppressWarnings(range(c(pvo$ratio, pvo$predicted, 1), na.rm = TRUE))
+  lim <- suppressWarnings(range(c(pvo$ratio, pvo$lo, pvo$hi, pvo$predicted, 1),
+                                na.rm = TRUE))
   if (!all(is.finite(lim)) || diff(lim) == 0) lim <- c(0, 1.2)
   g4 <- ggplot2::ggplot(pvo, ggplot2::aes(predicted, ratio, colour = anchor)) +
     ggplot2::geom_abline(slope = 1, intercept = 0, colour = "#6b6b6b",
                          linetype = "dashed") +
+    ggplot2::geom_linerange(ggplot2::aes(ymin = lo, ymax = hi), na.rm = TRUE,
+                            linewidth = 0.4) +
     ggplot2::geom_point(size = 2.2, na.rm = TRUE) +
     ggplot2::scale_colour_manual(values = c("#9ECAE1", "#08519C"), name = NULL) +
-    ggplot2::coord_fixed(xlim = lim, ylim = lim) +
+    # equal limits keep the diagonal meaningful; coord_fixed() would force a
+    # square panel and squash the whole column in patchwork
+    ggplot2::lims(x = lim, y = lim) +
     ggplot2::labs(title = "Predicted vs observed",
                   x = "Predicted", y = "Observed") +
     .fig_theme()
