@@ -383,6 +383,80 @@ Q_TOL_FRAC <- 0.15
 
 #' Multi-panel paper figure from aggregated results
 #'
+# ---------------------------------------------------------------------------
+# Category U: per-design information helpers
+#
+# Shared by the theory panels (Figure 1 panel E, supplementary) and the
+# theory-vs-empirical validation figures, so both read one implementation.
+# Equations referenced below are from docs/design-information-derivation.docx.
+# ---------------------------------------------------------------------------
+
+# anchor size and arm live in the scenario id (U05_050_pp), not the dgp
+.u_meta <- function(ids) {
+  purrr::map_dfr(ids, function(id) {
+    tibble::tibble(
+      scenario_id = id,
+      anchor = as.integer(sub("^U([0-9]+)_.*$", "\\1", id)),
+      arm    = sub("^.*_", "", id),
+      rho    = SCENARIO_CONFIGS[[id]]$dgp$rho)
+  })
+}
+
+# equation (6.5): (tau-aware ratio) x (identification discount)
+.u_theory <- function(ids, anchors, rho = seq(0.15, 0.85, length.out = 80)) {
+  if (!length(ids)) return(tibble::tibble())
+  g <- SCENARIO_CONFIGS[[ids[1]]]$dgp
+  sig <- g$within_sd; nn <- g$n_treatment
+  tau <- g$sigma_effect; tau_b <- g$sigma_trend; k <- U_ADD
+  tidyr::expand_grid(rho = rho, design = c("RCT (post-only)", "PP"),
+                     anchor = anchors) |>
+    dplyr::mutate(
+      s2D  = 4 * sig^2 * (1 - rho) / nn,
+      s2X  = ifelse(design == "PP", 2 * sig^2 * (1 - rho) / nn, 2 * sig^2 / nn),
+      ID   = 1 / (tau^2 + s2D), IX = 1 / (tau^2 + s2X),
+      i_nu = ifelse(design == "PP", 1 / (tau_b^2 + 2 * sig^2 * (1 - rho) / nn),
+                                    1 / (2 * sig^2 / nn)),
+      ratio = (IX / ID) * (anchor * i_nu) / (anchor * i_nu + k * IX))
+}
+
+# equation (5.2): the ceiling, i.e. the nuisance treated as known
+.u_ceiling <- function(ids, rho = seq(0.15, 0.85, length.out = 80)) {
+  if (!length(ids)) return(tibble::tibble())
+  g <- SCENARIO_CONFIGS[[ids[1]]]$dgp
+  sig <- g$within_sd; nn <- g$n_treatment; tau <- g$sigma_effect
+  tidyr::expand_grid(rho = rho, design = c("RCT (post-only)", "PP")) |>
+    dplyr::mutate(
+      s2D = 4 * sig^2 * (1 - rho) / nn,
+      s2X = ifelse(design == "PP", 2 * sig^2 * (1 - rho) / nn, 2 * sig^2 / nn),
+      ratio = (tau^2 + s2D) / (tau^2 + s2X))
+}
+
+# measured exchange rate: ratio of precision INCREMENTS, so the prior cancels
+.u_measured <- function(te, ids) {
+  empty <- tibble::tibble(rho = numeric(), anchor = numeric(),
+                          design = character(), ratio = numeric())
+  if (!length(ids)) return(empty)
+  d <- te |>
+    dplyr::filter(scenario_id %in% ids) |>
+    dplyr::inner_join(.u_meta(ids), by = "scenario_id")
+  # a non-converged `core` arm sits in the denominator of every ratio at its
+  # grid point, so drop it and leave the point missing rather than wrong
+  if ("max_rhat_worst" %in% names(d)) {
+    d <- dplyr::filter(d, is.na(max_rhat_worst) | max_rhat_worst <= 1.05)
+  }
+  w <- d |>
+    dplyr::mutate(prec = 1 / mean_posterior_sd^2) |>
+    dplyr::select(anchor, rho, arm, prec) |>
+    tidyr::pivot_wider(names_from = arm, values_from = prec)
+  if (!all(c("core", "did", "rct", "pp") %in% names(w)) || !nrow(w)) return(empty)
+  w |>
+    dplyr::transmute(rho, anchor,
+                     `RCT (post-only)` = (rct - core) / (did - core),
+                     `PP`              = (pp  - core) / (did - core)) |>
+    tidyr::pivot_longer(c(-rho, -anchor), names_to = "design",
+                        values_to = "ratio")
+}
+
 #' @param all_agg Aggregated results tibble (scenario x model x parameter).
 #' @return Named list of ggplot objects, one per panel letter.
 #'
@@ -502,9 +576,18 @@ paper_panels <- function(all_agg, paired = NULL, q_tol_frac = Q_TOL_FRAC) {
                         relationship = "many-to-many") |>
       dplyr::mutate(setting = setting)
   }
+  # Both settings differ in TWO respects -- effect heterogeneity and core size
+  # -- so the legend names both explicitly rather than saying "low"/"high".
+  k_se <- SCENARIO_CONFIGS[[scenario_ids("K")[1]]]$dgp$sigma_effect
+  s_se <- SCENARIO_CONFIGS[[scenario_ids("S")[1]]]$dgp$sigma_effect
   pd <- dplyr::bind_rows(
-    .composition("K", K_CORE, sprintf("low (core %d)", K_CORE)),
-    .composition("S", S_CORE, sprintf("high (core %d)", S_CORE))
+    .composition("K", K_CORE, "low"),
+    .composition("S", S_CORE, "high")
+  ) |>
+    dplyr::mutate(setting = factor(setting, levels = c("low", "high")))
+  pd_labs <- list(
+    bquote(tau[theta] == .(k_se) ~ "," ~ .(K_CORE) ~ "DiD core"),
+    bquote(tau[theta] == .(s_se) ~ "," ~ .(S_CORE) ~ "DiD core")
   )
   gD <- ggplot2::ggplot(pd, ggplot2::aes(added, mean_posterior_sd,
                                          colour = setting, linetype = curve)) +
@@ -514,11 +597,13 @@ paper_panels <- function(all_agg, paired = NULL, q_tol_frac = Q_TOL_FRAC) {
       ggplot2::aes(ymin = mean_posterior_sd - 1.96 * se_posterior_sd,
                    ymax = mean_posterior_sd + 1.96 * se_posterior_sd),
       size = 0.35, linewidth = 0.4, na.rm = TRUE) +
-    ggplot2::scale_colour_manual(values = c("#0072B2", "#D55E00"),
-                                 name = expression(tau[theta])) +
-    ggplot2::scale_linetype_manual(values = c("RCT + PP" = "solid",
-                                              "DiD (reference)" = "dashed"),
-                                   name = NULL) +
+    ggplot2::scale_colour_manual(values = c(low = "#0072B2", high = "#D55E00"),
+                                 labels = pd_labs, name = NULL) +
+    ggplot2::scale_linetype_manual(
+      values = c("RCT + PP" = "solid", "DiD (reference)" = "dashed"),
+      labels = c("RCT + PP" = "mixed: RCT + PP added",
+                 "DiD (reference)" = "DiD added (reference)"),
+      name = NULL) +
     ggplot2::labs(title = "B  Marginal value of incomplete designs (K, S)",
                   x = "Studies added to the DiD core",
                   y = expression("Posterior SD of " * mu[theta])) +
@@ -708,95 +793,60 @@ paper_panels <- function(all_agg, paired = NULL, q_tol_frac = Q_TOL_FRAC) {
   # so the vertical gap between a measured curve and its own prediction is the
   # price of incompleteness: PP must borrow the trend, the RCT must
   # accommodate baseline imbalance.
-  u_ids <- scenario_ids("U")
-  u_meta <- purrr::map_dfr(u_ids, function(id) {
-    tibble::tibble(
-      scenario_id = id,
-      # anchor and arm live in the id, not the dgp -- see R/scenarios.R
-      anchor = as.integer(sub("^U([0-9]+)_.*$", "\\1", id)),
-      arm    = sub("^.*_", "", id),
-      rho    = SCENARIO_CONFIGS[[id]]$dgp$rho)
-  })
-  u_dat <- te |>
-    dplyr::filter(scenario_id %in% u_ids) |>
-    dplyr::inner_join(u_meta, by = "scenario_id")
-  # A non-converged arm makes its precision meaningless, and a bad `core` arm
-  # sits in the denominator of every ratio at its grid point. Drop such rows so
-  # the affected point goes MISSING (a visible gap) rather than silently wrong.
-  if ("max_rhat_worst" %in% names(u_dat)) {
-    u_dat <- dplyr::filter(u_dat, is.na(max_rhat_worst) | max_rhat_worst <= 1.05)
-  }
-  pu <- u_dat |>
-    dplyr::mutate(prec = 1 / mean_posterior_sd^2) |>
-    dplyr::select(anchor, rho, arm, prec) |>
-    tidyr::pivot_wider(names_from = arm, values_from = prec)
-  pu <- if (all(c("core", "did", "rct", "pp") %in% names(pu)) && nrow(pu)) {
-    pu |>
-      dplyr::transmute(
-        rho,
-        series = paste(anchor, "DiD anchor"),
-        `RCT (post-only)` = (rct - core) / (did - core),
-        `PP`              = (pp  - core) / (did - core)) |>
-      tidyr::pivot_longer(c(-rho, -series), names_to = "design",
-                          values_to = "ratio")
-  } else {
-    tibble::tibble(rho = numeric(), series = character(),
-                   design = character(), ratio = numeric())
-  }
+  u_ids     <- scenario_ids("U")
+  u_meta    <- .u_meta(u_ids)
+  u_anchors <- sort(unique(u_meta$anchor))
+  pu_all    <- .u_measured(te, u_ids)
+  u_th      <- .u_theory(u_ids, u_anchors)
+  u_ceil    <- .u_ceiling(u_ids)
 
-  # Two analytic references, both computed from the DGP (no tuning):
-  #   no heterogeneity   s2_DiD / s2_X            -- the pure design effect
-  #   with tau_theta     (tau^2+s2_DiD)/(tau^2+s2_X)
-  # A study informs mu_theta with weight 1/(tau^2 + s^2), so heterogeneity puts
-  # a floor under it: as tau grows every design tends to parity. The naive line
-  # is the tau -> 0 limit. Note both give exactly 1 for the RCT at rho = 0.5,
-  # where s2_DiD == s2_RCT -- that crossover is invariant to tau.
-  .u_ref <- function(ids) {
-    if (!length(ids)) return(tibble::tibble())
-    g <- SCENARIO_CONFIGS[[ids[1]]]$dgp
-    sig <- g$within_sd; nn <- g$n_treatment; tau <- g$sigma_effect
-    s2 <- function(design, rho) switch(design,
-      DiD = 4 * sig^2 * (1 - rho) / nn,
-      RCT = 2 * sig^2 / nn,
-      PP  = 2 * sig^2 * (1 - rho) / nn)
-    tidyr::expand_grid(rho = seq(0.15, 0.85, length.out = 80),
-                       design = c("RCT (post-only)", "PP")) |>
-      dplyr::mutate(
-        d  = ifelse(design == "PP", "PP", "RCT"),
-        sD = purrr::map_dbl(rho, ~ s2("DiD", .x)),
-        sX = purrr::map2_dbl(d, rho, ~ s2(.x, .y))) |>
-      dplyr::transmute(
-        rho, design,
-        `reference: no heterogeneity` = sD / sX,
-        `reference: with tau`         = (tau^2 + sD) / (tau^2 + sX)) |>
-      tidyr::pivot_longer(tidyselect::starts_with("reference"),
-                          names_to = "series", values_to = "ratio")
-  }
-  u_ref <- .u_ref(u_ids)
-
-  # Measured lines are thick and solid/long-dash; references are thin and
-  # dot-based, so the two kinds never read as each other.
-  u_lty <- c("20 DiD anchor" = "solid", "5 DiD anchor" = "42",
-             "reference: with tau" = "dotdash",
-             "reference: no heterogeneity" = "dotted")
-  gU <- ggplot2::ggplot(mapping = ggplot2::aes(rho, ratio, colour = design,
-                                               linetype = series)) +
-    ggplot2::geom_hline(yintercept = 1, linetype = "dashed",
-                        colour = "#c4c4c4") +
-    ggplot2::geom_line(data = u_ref, linewidth = 0.35, alpha = 0.6) +
-    ggplot2::geom_line(data = pu, linewidth = 0.6, na.rm = TRUE) +
-    ggplot2::geom_point(data = pu, ggplot2::aes(shape = NULL), size = 1.6,
-                        na.rm = TRUE) +
-    ggplot2::scale_colour_manual(values = c("RCT (post-only)" = "#009E73",
-                                            "PP" = "#CC79A7"), name = NULL) +
-    ggplot2::scale_linetype_manual(values = u_lty, breaks = names(u_lty),
+  # One panel per design, sharing construction. Both the Figure 1 panel and
+  # the supplement are THEORY ONLY -- closed-form curves from equations (5.2)
+  # and (6.5) of docs/design-information-derivation.docx. Set show_measured to
+  # overlay the simulated points; nothing does at present.
+  .exchange_panel <- function(designs, ttl, facet = FALSE,
+                              show_measured = FALSE) {
+    lab_anchor <- function(x) paste(x, "DiD anchor")
+    th <- dplyr::filter(u_th, design %in% designs) |>
+      dplyr::mutate(anchor = factor(lab_anchor(anchor)))
+    ce <- dplyr::filter(u_ceil, design %in% designs)
+    g <- ggplot2::ggplot(mapping = ggplot2::aes(rho, ratio)) +
+      ggplot2::geom_hline(yintercept = 1, colour = "#dcdcdc") +
+      # ceiling: what the design would be worth if the nuisance were KNOWN
+      ggplot2::geom_line(data = ce, ggplot2::aes(linetype = "nuisance known"),
+                         colour = "#6b6b6b", linewidth = 0.45) +
+      # realised: the nuisance is estimated from the anchor
+      ggplot2::geom_line(data = th,
+                         ggplot2::aes(colour = anchor,
+                                      linetype = "nuisance estimated"),
+                         linewidth = 0.7)
+    if (show_measured) {
+      m <- dplyr::filter(pu_all, design %in% designs) |>
+        dplyr::mutate(anchor = factor(lab_anchor(anchor)))
+      g <- g +
+        ggplot2::geom_point(data = m, ggplot2::aes(colour = anchor), size = 1.6,
+                            na.rm = TRUE)
+    }
+    g <- g +
+      ggplot2::scale_colour_manual(values = c("#9ECAE1", "#08519C"),
                                    name = NULL) +
-    ggplot2::expand_limits(y = 0) +
-    ggplot2::labs(
-      title = "E  Value of each design, vs one DiD study",
-      x = expression("Pre-post correlation " * rho),
-      y = "Information per study, relative to DiD") +
-    .fig_theme()
+      ggplot2::scale_linetype_manual(
+        values = c("nuisance known" = "dotdash",
+                   "nuisance estimated" = "solid"),
+        breaks = c("nuisance known", "nuisance estimated"), name = NULL) +
+      ggplot2::expand_limits(y = 0) +
+      ggplot2::labs(title = ttl,
+                    x = expression("Pre-post correlation " * rho),
+                    y = "Information per study, relative to DiD") +
+      .fig_theme()
+    if (facet) g <- g + ggplot2::facet_wrap(~ design)
+    g
+  }
+  gU  <- .exchange_panel("RCT (post-only)",
+                         "E  Value of a post-only RCT, vs one DiD study")
+  gU2 <- .exchange_panel(c("PP", "RCT (post-only)"),
+                         "Value of each incomplete design, vs one DiD study",
+                         facet = TRUE)
 
   list(A = gA,   # calibration (A/F)
        B = gB,   # trend-mean sweep, bias (J)
@@ -807,7 +857,8 @@ paper_panels <- function(all_agg, paired = NULL, q_tol_frac = Q_TOL_FRAC) {
        G = gK,   # trend plane, full model bias (Q)
        H = gL,   # trend plane, naive model bias (Q)
        I = gM,   # trend plane, which model to use (Q)
-       U = gU)   # per-design exchange rate vs rho (U)
+       U = gU,   # post-only RCT exchange rate vs rho (U)
+       U2 = gU2) # both designs, faceted -- supplementary
 }
 
 illustration_panels <- function(draws) {
@@ -891,6 +942,17 @@ plot_figure1 <- function(all_agg, illustration, paired = NULL,
   )
 }
 
+#' Supplementary figure: the exchange rate for both incomplete designs
+#'
+#' Figure 1 panel E shows only the post-only RCT. This keeps the PP comparison,
+#' faceted, for the supplement.
+#'
+#' @param all_agg Aggregated results tibble.
+#' @return A patchwork/ggplot object.
+plot_figure_si <- function(all_agg) {
+  paper_panels(all_agg)$U2
+}
+
 #' Figure 2: the trend plane and the model-choice map
 #'
 #' @param all_agg Aggregated results tibble.
@@ -951,7 +1013,13 @@ render_paper_figures <- function(dir = "output", out = dir, save = TRUE,
   figs <- list(
     figure1 = list(plot = plot_figure1(agg, illus, paired, q_tol_frac),
                    w = 13, h = 9),
-    figure2 = list(plot = plot_figure2(agg, q_tol_frac), w = 13, h = 5)
+    figure2 = list(plot = plot_figure2(agg, q_tol_frac), w = 13, h = 5),
+    figure_si = list(plot = plot_figure_si(agg), w = 9, h = 4.6),
+    # theory vs simulation, one per incomplete design
+    figure_val_pp  = list(plot = plot_design_validation(agg, "PP"),
+                          w = 10, h = 8),
+    figure_val_rct = list(plot = plot_design_validation(agg, "RCT (post-only)"),
+                          w = 10, h = 8)
   )
   if (save) {
     dir.create(out, showWarnings = FALSE, recursive = TRUE)
@@ -991,4 +1059,93 @@ q_tolerance_scan <- function(all_agg, fracs = c(0.05, 0.10, 0.15, 0.20,
                      "Neither usable: drop PP"))))
       )
   })
+}
+
+#' Theory-vs-empirical validation figure for one incomplete design
+#'
+#' Four panels:
+#'   1-2  exchange rate against rho, one per anchor: the closed-form curve
+#'        (equation 6.5) with the simulated points on top
+#'   3    the absolute posterior SDs the ratio is built from, so any
+#'        disagreement can be traced to a particular arm rather than guessed at
+#'   4    predicted against observed, with a 1:1 line
+#'
+#' Panels 1-2 and 4 answer "do they agree"; panel 3 answers "and if not, where
+#' does it come from".
+#'
+#' @param all_agg Aggregated results tibble (or figure_panels.csv).
+#' @param design  "PP" or "RCT (post-only)".
+#' @return A patchwork object (4 panels, 2 x 2).
+plot_design_validation <- function(all_agg, design = "PP") {
+  te <- dplyr::filter(all_agg, parameter == "treatment_effect_mean")
+  ids <- scenario_ids("U")
+  meta <- .u_meta(ids)
+  anchors <- sort(unique(meta$anchor))
+  rhos <- sort(unique(meta$rho))
+  arm_key <- if (design == "PP") "pp" else "rct"
+
+  meas <- dplyr::filter(.u_measured(te, ids), design == !!design)
+  th   <- dplyr::filter(.u_theory(ids, anchors), design == !!design)
+  # theory evaluated AT the simulated rho values, for panel 4
+  th_at <- dplyr::filter(.u_theory(ids, anchors, rho = rhos),
+                         design == !!design) |>
+    dplyr::select(rho, anchor, predicted = ratio)
+
+  by_anchor <- function(a) {
+    ggplot2::ggplot(mapping = ggplot2::aes(rho, ratio)) +
+      ggplot2::geom_hline(yintercept = 1, colour = "#dcdcdc") +
+      ggplot2::geom_line(data = dplyr::filter(th, anchor == a),
+                         colour = "#08519C", linewidth = 0.6) +
+      ggplot2::geom_point(data = dplyr::filter(meas, anchor == a),
+                          colour = "#111111", size = 2, na.rm = TRUE) +
+      ggplot2::expand_limits(y = 0) +
+      ggplot2::labs(title = sprintf("%d DiD anchor", a),
+                    x = expression(rho),
+                    y = "Information per study, rel. DiD") +
+      .fig_theme()
+  }
+
+  # panel 3: the absolute quantities the ratio is derived from
+  abs_dat <- te |>
+    dplyr::filter(scenario_id %in% ids) |>
+    dplyr::inner_join(meta, by = "scenario_id") |>
+    dplyr::filter(arm %in% c("core", "did", arm_key)) |>
+    dplyr::mutate(arm = factor(arm, levels = c("core", "did", arm_key),
+                               labels = c("core (DiD only)", "+ DiD",
+                                          paste("+", design))),
+                  anchor = factor(paste(anchor, "anchor")))
+  g3 <- ggplot2::ggplot(abs_dat, ggplot2::aes(rho, mean_posterior_sd,
+                                              colour = arm, linetype = anchor)) +
+    ggplot2::geom_line(linewidth = 0.5) +
+    ggplot2::geom_point(size = 1.6) +
+    ggplot2::scale_colour_manual(values = c("#6b6b6b", "#08519C", "#CC79A7"),
+                                 name = NULL) +
+    ggplot2::scale_linetype_manual(values = c("dashed", "solid"), name = NULL) +
+    ggplot2::expand_limits(y = 0) +
+    ggplot2::labs(title = "Absolute inputs",
+                  x = expression(rho),
+                  y = expression("Posterior SD of " * mu[theta])) +
+    .fig_theme()
+
+  pvo <- meas |>
+    dplyr::inner_join(th_at, by = c("rho", "anchor")) |>
+    dplyr::mutate(anchor = factor(paste(anchor, "anchor")))
+  lim <- suppressWarnings(range(c(pvo$ratio, pvo$predicted, 1), na.rm = TRUE))
+  if (!all(is.finite(lim)) || diff(lim) == 0) lim <- c(0, 1.2)
+  g4 <- ggplot2::ggplot(pvo, ggplot2::aes(predicted, ratio, colour = anchor)) +
+    ggplot2::geom_abline(slope = 1, intercept = 0, colour = "#6b6b6b",
+                         linetype = "dashed") +
+    ggplot2::geom_point(size = 2.2, na.rm = TRUE) +
+    ggplot2::scale_colour_manual(values = c("#9ECAE1", "#08519C"), name = NULL) +
+    ggplot2::coord_fixed(xlim = lim, ylim = lim) +
+    ggplot2::labs(title = "Predicted vs observed",
+                  x = "Predicted", y = "Observed") +
+    .fig_theme()
+
+  patchwork::wrap_plots(by_anchor(anchors[1]), by_anchor(anchors[2]), g3, g4,
+                        ncol = 2) +
+    patchwork::plot_annotation(
+      title = paste0("Theory vs simulation: ", design),
+      theme = ggplot2::theme(
+        plot.title = ggplot2::element_text(face = "bold", size = 11)))
 }

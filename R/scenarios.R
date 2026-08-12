@@ -1788,7 +1788,11 @@ rm(.i, .nd, .np)
 # ---------------------------------------------------------------------------
 U_CORES <- c(5L, 20L)   # DiD anchor sizes: weak and strong
 U_ADD   <- 20L          # studies added, of whichever design
-U_RHO   <- c(0.2, 0.35, 0.5, 0.65, 0.8)
+# Three rho values, not five: the theory panels are closed-form curves that
+# need no simulation, so the grid only has to support the theory-vs-empirical
+# validation figure. 0.5 is kept because s2_DiD == s2_RCT exactly there, making
+# the RCT parity point invariant to tau_theta; 0.2 and 0.8 bracket it.
+U_RHO   <- c(0.2, 0.5, 0.8)
 
 # Two anchor levels because PP's ceiling of 2 assumes the trend is KNOWN. In
 # practice it is estimated from the anchor, and that uncertainty is charged to

@@ -292,5 +292,11 @@ jobs:
             metadid-sims/output/figure1.pdf
             metadid-sims/output/figure2.png
             metadid-sims/output/figure2.pdf
+            metadid-sims/output/figure_si.png
+            metadid-sims/output/figure_si.pdf
+            metadid-sims/output/figure_val_pp.png
+            metadid-sims/output/figure_val_pp.pdf
+            metadid-sims/output/figure_val_rct.png
+            metadid-sims/output/figure_val_rct.pdf
           if-no-files-found: error
           retention-days: 90
