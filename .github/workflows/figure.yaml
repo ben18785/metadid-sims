@@ -88,11 +88,14 @@ jobs:
           use-public-rspm: true
           extra-repositories: "https://mc-stan.org/r-packages/"
 
-      - uses: r-lib/actions/setup-pandoc@v2
-
       # tarchetypes::tar_quarto() in _targets.R probes the Quarto CLI at
       # pipeline-construction time, so tar_make() needs the binary even
       # though this workflow never renders the report.
+      #
+      # No setup-pandoc here on purpose: nothing in this workflow renders a
+      # document (render_paper_figures() only calls ggsave), and Quarto ships
+      # its own pandoc. Downloading it separately added two network calls per
+      # job with nothing depending on the result -- and it 503'd.
       - uses: quarto-dev/quarto-actions/setup@v2
 
       - name: Install R package dependencies
@@ -155,12 +158,16 @@ jobs:
   assemble:
     name: Assemble figure
     needs: simulate
-    # NOT always(): that also fires when the run is CANCELLED, and this job
-    # would then start a tar_make against an empty store and re-simulate every
-    # missing category serially on one runner -- the failure that burned 6h in
-    # sims.yaml run 31431550646. !cancelled() keeps the recover-from-partial-
-    # failure behaviour without the cancellation pathology.
-    if: ${{ !cancelled() }}
+    # No `if:` at all, i.e. the default success(): assemble runs only when
+    # every category job succeeded.
+    #
+    # The alternatives both end badly. always() also fires on CANCELLATION,
+    # which is what burned 6h in sims.yaml run 31431550646. !cancelled() still
+    # fires when a category FAILS, and tar_make would then quietly re-simulate
+    # that whole category serially on one runner -- at 20+ replicates, an hour
+    # of silent work that looks like a hang. Failing fast is cheaper: the
+    # successful slices survive as artifacts, so re-running the failed jobs
+    # picks up where it left off.
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
@@ -182,8 +189,6 @@ jobs:
         with:
           use-public-rspm: true
           extra-repositories: "https://mc-stan.org/r-packages/"
-
-      - uses: r-lib/actions/setup-pandoc@v2
 
       - uses: quarto-dev/quarto-actions/setup@v2
 
