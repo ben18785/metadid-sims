@@ -359,6 +359,13 @@ plot_divergences <- function(agg_results) {
 
 # Diverging fill for signed bias surfaces (panels K/L). Deliberately NOT the
 # categorical model hues: here colour encodes sign and magnitude, not identity.
+# Default tolerable |bias| for the panel-I model-choice map, as a fraction of
+# the true effect. A judgement call, not a property of the data: 0.10 condemned
+# most of the trend plane as unusable, and the map is flat from 0.05 to 0.15,
+# so 0.15 is the least strict value that still discriminates. Defined once so
+# the entry points below cannot drift apart; override per call where needed.
+Q_TOL_FRAC <- 0.15
+
 # TRUE when a pivoted frame actually has both model arms. Panels are built
 # eagerly, so without this a category absent from `all_agg` (e.g. previewing a
 # partial figure_panels.csv locally) would error out the whole panel list.
@@ -384,7 +391,7 @@ plot_divergences <- function(agg_results) {
 #' the pipeline:  paper_panels(readr::read_csv("figure_panels.csv"))$I
 #' Panels whose category is absent from `all_agg` come back empty rather than
 #' erroring, so a partial CSV still lets you inspect the panels it does cover.
-paper_panels <- function(all_agg, paired = NULL) {
+paper_panels <- function(all_agg, paired = NULL, q_tol_frac = Q_TOL_FRAC) {
   te <- all_agg |> dplyr::filter(parameter == "treatment_effect_mean")
 
   # --- A: calibration coverage across A and F scenarios -------------------
@@ -459,55 +466,62 @@ paper_panels <- function(all_agg, paired = NULL) {
                   y = "Coverage of 90% CrI") +
     .fig_theme()
 
-  # --- D: information from incomplete designs (K) -------------------------
-  k_ids <- scenario_ids("K")
-  k_info <- purrr::map_dfr(k_ids, function(id) {
-    d <- SCENARIO_CONFIGS[[id]]$dgp
-    tibble::tibble(
-      scenario_id = id,
-      added = (d$n_did - K_CORE) + d$n_rct + d$n_pp,
-      curve = dplyr::case_when(
-        d$n_rct > 0 & d$n_pp > 0 ~ "RCT + PP",
-        d$n_rct > 0              ~ "RCT only",
-        d$n_pp  > 0              ~ "PP only",
-        d$n_did > K_CORE         ~ "DiD (reference)",
-        TRUE                     ~ "core"
+  # --- D: composition sweeps at low and high effect heterogeneity ---------
+  # K and S combined. Colour separates the two heterogeneity settings, the
+  # linetype keeps the within-setting contrast (mixed vs the DiD reference).
+  # The message is the GAP between a solid line and the dashed line of the
+  # same colour: wide at low tau_theta (an incomplete study is worth less
+  # than a DiD study), closed at high tau_theta (parity).
+  .composition <- function(prefix, core, setting) {
+    ids <- scenario_ids(prefix)
+    info <- purrr::map_dfr(ids, function(id) {
+      d <- SCENARIO_CONFIGS[[id]]$dgp
+      tibble::tibble(
+        scenario_id = id,
+        added = (d$n_did - core) + d$n_rct + d$n_pp,
+        curve = dplyr::case_when(
+          d$n_rct > 0 & d$n_pp > 0 ~ "RCT + PP",
+          d$n_rct > 0              ~ "RCT only",
+          d$n_pp  > 0              ~ "PP only",
+          d$n_did > core           ~ "DiD (reference)",
+          TRUE                     ~ "core"
+        )
       )
+    })
+    info <- dplyr::filter(info, curve %in% c("RCT + PP", "DiD (reference)",
+                                             "core"))
+    keep <- setdiff(unique(info$curve), "core")
+    all <- dplyr::bind_rows(
+      dplyr::filter(info, curve != "core"),
+      tidyr::crossing(dplyr::select(dplyr::filter(info, curve == "core"),
+                                    -curve), curve = keep)
     )
-  })
-  # Only the mixed RCT+PP sweep against the DiD reference, matching the S
-  # panel so the two are read side by side. The RCT-only and PP-only arms are
-  # still simulated and remain available for the SI.
-  k_info <- dplyr::filter(k_info,
-                          curve %in% c("RCT + PP", "DiD (reference)", "core"))
-  curves <- setdiff(unique(k_info$curve), "core")
-  k_core <- k_info |> dplyr::filter(curve == "core")
-  k_all <- dplyr::bind_rows(
-    k_info |> dplyr::filter(curve != "core"),
-    tidyr::crossing(k_core |> dplyr::select(-curve), curve = curves)
+    te |>
+      dplyr::filter(scenario_id %in% ids) |>
+      dplyr::inner_join(all, by = "scenario_id",
+                        relationship = "many-to-many") |>
+      dplyr::mutate(setting = setting)
+  }
+  pd <- dplyr::bind_rows(
+    .composition("K", K_CORE, sprintf("low (core %d)", K_CORE)),
+    .composition("S", S_CORE, sprintf("high (core %d)", S_CORE))
   )
-  pd <- te |>
-    dplyr::filter(scenario_id %in% k_ids) |>
-    dplyr::inner_join(k_all, by = "scenario_id",
-                      relationship = "many-to-many")
   gD <- ggplot2::ggplot(pd, ggplot2::aes(added, mean_posterior_sd,
-                                         colour = curve, linetype = curve)) +
+                                         colour = setting, linetype = curve)) +
     ggplot2::geom_line(linewidth = 0.5) +
     # +/- 1.96 MC standard errors of the mean across replicates.
     ggplot2::geom_pointrange(
       ggplot2::aes(ymin = mean_posterior_sd - 1.96 * se_posterior_sd,
                    ymax = mean_posterior_sd + 1.96 * se_posterior_sd),
-      size = 0.25, fatten = 2.4, na.rm = TRUE) +
-    ggplot2::scale_colour_manual(values = c(
-      "RCT + PP" = "#0072B2", "RCT only" = "#009E73",
-      "PP only" = "#CC79A7", "DiD (reference)" = "#6b6b6b")) +
-    ggplot2::scale_linetype_manual(values = c(
-      "RCT + PP" = "solid", "RCT only" = "solid",
-      "PP only" = "solid", "DiD (reference)" = "dashed")) +
-    ggplot2::labs(title = "E  Adding incomplete designs to a small DiD core (K)",
-                  x = sprintf("Studies added to a core of %d DiD", K_CORE),
+      size = 0.35, linewidth = 0.4, na.rm = TRUE) +
+    ggplot2::scale_colour_manual(values = c("#0072B2", "#D55E00"),
+                                 name = expression(tau[theta])) +
+    ggplot2::scale_linetype_manual(values = c("RCT + PP" = "solid",
+                                              "DiD (reference)" = "dashed"),
+                                   name = NULL) +
+    ggplot2::labs(title = "B  Marginal value of incomplete designs (K, S)",
+                  x = "Studies added to the DiD core",
                   y = expression("Posterior SD of " * mu[theta])) +
-    ggplot2::expand_limits(y = 0) +
     .fig_theme()
 
   # --- I: efficiency over the trend-variability sweep (M) -----------------
@@ -549,7 +563,7 @@ paper_panels <- function(all_agg, paired = NULL) {
                         colour = "#6b6b6b") +
     ggplot2::geom_line(linewidth = 0.5, colour = "#0072B2") +
     ggplot2::geom_pointrange(ggplot2::aes(ymin = lo, ymax = hi),
-                             colour = "#0072B2", size = 0.25, fatten = 2.4,
+                             colour = "#0072B2", size = 0.35, linewidth = 0.4,
                              na.rm = TRUE) +
     ggplot2::labs(title = "D  Variable trends, zero mean: RMSE ratio (M)",
                   x = expression(tau[beta] * " (multiples of default), " *
@@ -590,8 +604,8 @@ paper_panels <- function(all_agg, paired = NULL) {
     ggplot2::geom_hline(yintercept = 1, linetype = "dashed",
                         colour = "#6b6b6b") +
     ggplot2::geom_line(linewidth = 0.5) +
-    ggplot2::geom_pointrange(ggplot2::aes(ymin = lo, ymax = hi), size = 0.25,
-                             fatten = 2.4, na.rm = TRUE) +
+    ggplot2::geom_pointrange(ggplot2::aes(ymin = lo, ymax = hi), size = 0.35,
+                             linewidth = 0.4, na.rm = TRUE) +
     # ordered quantity -> sequential ramp, not categorical hues
     ggplot2::scale_colour_manual(values = c("#9ECAE1", "#4292C6", "#08519C"),
                                  name = "PP studies") +
@@ -644,7 +658,9 @@ paper_panels <- function(all_agg, paired = NULL) {
   # the PP studies carry no usable information about theta and the fallback
   # is a DiD-only analysis, which differences out its own trend and so is
   # unbiased anywhere on this plane.
-  q_tol_frac <- 0.10   # tolerable |bias| as a fraction of the true effect
+  # Tolerable |bias| as a fraction of the true effect. This is a judgement
+  # call, not a property of the data -- it is a plot-time argument so it can be
+  # varied against an existing figure_panels.csv without rerunning anything.
   q_tol <- q_tol_frac * stats::median(abs(pq$true_value), na.rm = TRUE)
   pm <- pq |>
     dplyr::select(scenario_id, model_label, mean_bias, x, y) |>
@@ -684,61 +700,114 @@ paper_panels <- function(all_agg, paired = NULL) {
                    plot.subtitle = ggplot2::element_text(size = 7,
                                                          colour = "#5c5c5c"))
 
-  # --- S: composition sweep under high effect heterogeneity (S) -----------
-  # Same construction as the K panel, on the S grid (sigma_effect = 0.10).
-  # Only two curves exist here: the mixed RCT+PP sweep and the DiD reference.
-  s_ids <- scenario_ids("S")
-  s_info <- purrr::map_dfr(s_ids, function(id) {
-    d <- SCENARIO_CONFIGS[[id]]$dgp
+  # --- U: what each incomplete design is worth, against rho ---------------
+  # Information added PER STUDY, relative to one DiD study. Precision (not SD)
+  # because information adds roughly linearly, which is what makes "per study"
+  # meaningful. Thin dashed lines are the analytic per-study predictions
+  #   PP / DiD = 2,   RCT / DiD = 2 (1 - rho)
+  # so the vertical gap between a measured curve and its own prediction is the
+  # price of incompleteness: PP must borrow the trend, the RCT must
+  # accommodate baseline imbalance.
+  u_ids <- scenario_ids("U")
+  u_meta <- purrr::map_dfr(u_ids, function(id) {
     tibble::tibble(
       scenario_id = id,
-      added = (d$n_did - S_CORE) + d$n_rct + d$n_pp,
-      curve = dplyr::case_when(
-        d$n_rct > 0 & d$n_pp > 0 ~ "RCT + PP",
-        d$n_did > S_CORE         ~ "DiD (reference)",
-        TRUE                     ~ "core"
-      )
-    )
+      # anchor and arm live in the id, not the dgp -- see R/scenarios.R
+      anchor = as.integer(sub("^U([0-9]+)_.*$", "\\1", id)),
+      arm    = sub("^.*_", "", id),
+      rho    = SCENARIO_CONFIGS[[id]]$dgp$rho)
   })
-  s_curves <- setdiff(unique(s_info$curve), "core")
-  s_core <- s_info |> dplyr::filter(curve == "core")
-  s_all <- dplyr::bind_rows(
-    s_info |> dplyr::filter(curve != "core"),
-    tidyr::crossing(s_core |> dplyr::select(-curve), curve = s_curves)
-  )
-  ps <- te |>
-    dplyr::filter(scenario_id %in% s_ids) |>
-    dplyr::inner_join(s_all, by = "scenario_id",
-                      relationship = "many-to-many")
-  gS <- ggplot2::ggplot(ps, ggplot2::aes(added, mean_posterior_sd,
-                                         colour = curve, linetype = curve)) +
-    ggplot2::geom_line(linewidth = 0.5) +
-    # +/- 1.96 MC standard errors of the mean across replicates.
-    ggplot2::geom_pointrange(
-      ggplot2::aes(ymin = mean_posterior_sd - 1.96 * se_posterior_sd,
-                   ymax = mean_posterior_sd + 1.96 * se_posterior_sd),
-      size = 0.25, fatten = 2.4, na.rm = TRUE) +
-    ggplot2::scale_colour_manual(values = c(
-      "RCT + PP" = "#0072B2", "DiD (reference)" = "#6b6b6b")) +
-    ggplot2::scale_linetype_manual(values = c(
-      "RCT + PP" = "solid", "DiD (reference)" = "dashed")) +
-    ggplot2::labs(
-      title = "Incomplete designs reach parity under high heterogeneity (S)",
-      x = sprintf("Studies added to a core of %d DiD", S_CORE),
-      y = expression("Posterior SD of " * mu[theta])) +
+  u_dat <- te |>
+    dplyr::filter(scenario_id %in% u_ids) |>
+    dplyr::inner_join(u_meta, by = "scenario_id")
+  # A non-converged arm makes its precision meaningless, and a bad `core` arm
+  # sits in the denominator of every ratio at its grid point. Drop such rows so
+  # the affected point goes MISSING (a visible gap) rather than silently wrong.
+  if ("max_rhat_worst" %in% names(u_dat)) {
+    u_dat <- dplyr::filter(u_dat, is.na(max_rhat_worst) | max_rhat_worst <= 1.05)
+  }
+  pu <- u_dat |>
+    dplyr::mutate(prec = 1 / mean_posterior_sd^2) |>
+    dplyr::select(anchor, rho, arm, prec) |>
+    tidyr::pivot_wider(names_from = arm, values_from = prec)
+  pu <- if (all(c("core", "did", "rct", "pp") %in% names(pu)) && nrow(pu)) {
+    pu |>
+      dplyr::transmute(
+        rho,
+        series = paste(anchor, "DiD anchor"),
+        `RCT (post-only)` = (rct - core) / (did - core),
+        `PP`              = (pp  - core) / (did - core)) |>
+      tidyr::pivot_longer(c(-rho, -series), names_to = "design",
+                          values_to = "ratio")
+  } else {
+    tibble::tibble(rho = numeric(), series = character(),
+                   design = character(), ratio = numeric())
+  }
+
+  # Two analytic references, both computed from the DGP (no tuning):
+  #   no heterogeneity   s2_DiD / s2_X            -- the pure design effect
+  #   with tau_theta     (tau^2+s2_DiD)/(tau^2+s2_X)
+  # A study informs mu_theta with weight 1/(tau^2 + s^2), so heterogeneity puts
+  # a floor under it: as tau grows every design tends to parity. The naive line
+  # is the tau -> 0 limit. Note both give exactly 1 for the RCT at rho = 0.5,
+  # where s2_DiD == s2_RCT -- that crossover is invariant to tau.
+  .u_ref <- function(ids) {
+    if (!length(ids)) return(tibble::tibble())
+    g <- SCENARIO_CONFIGS[[ids[1]]]$dgp
+    sig <- g$within_sd; nn <- g$n_treatment; tau <- g$sigma_effect
+    s2 <- function(design, rho) switch(design,
+      DiD = 4 * sig^2 * (1 - rho) / nn,
+      RCT = 2 * sig^2 / nn,
+      PP  = 2 * sig^2 * (1 - rho) / nn)
+    tidyr::expand_grid(rho = seq(0.15, 0.85, length.out = 80),
+                       design = c("RCT (post-only)", "PP")) |>
+      dplyr::mutate(
+        d  = ifelse(design == "PP", "PP", "RCT"),
+        sD = purrr::map_dbl(rho, ~ s2("DiD", .x)),
+        sX = purrr::map2_dbl(d, rho, ~ s2(.x, .y))) |>
+      dplyr::transmute(
+        rho, design,
+        `reference: no heterogeneity` = sD / sX,
+        `reference: with tau`         = (tau^2 + sD) / (tau^2 + sX)) |>
+      tidyr::pivot_longer(tidyselect::starts_with("reference"),
+                          names_to = "series", values_to = "ratio")
+  }
+  u_ref <- .u_ref(u_ids)
+
+  # Measured lines are thick and solid/long-dash; references are thin and
+  # dot-based, so the two kinds never read as each other.
+  u_lty <- c("20 DiD anchor" = "solid", "5 DiD anchor" = "42",
+             "reference: with tau" = "dotdash",
+             "reference: no heterogeneity" = "dotted")
+  gU <- ggplot2::ggplot(mapping = ggplot2::aes(rho, ratio, colour = design,
+                                               linetype = series)) +
+    ggplot2::geom_hline(yintercept = 1, linetype = "dashed",
+                        colour = "#c4c4c4") +
+    ggplot2::geom_line(data = u_ref, linewidth = 0.35, alpha = 0.6) +
+    ggplot2::geom_line(data = pu, linewidth = 0.6, na.rm = TRUE) +
+    ggplot2::geom_point(data = pu, ggplot2::aes(shape = NULL), size = 1.6,
+                        na.rm = TRUE) +
+    ggplot2::scale_colour_manual(values = c("RCT (post-only)" = "#009E73",
+                                            "PP" = "#CC79A7"), name = NULL) +
+    ggplot2::scale_linetype_manual(values = u_lty, breaks = names(u_lty),
+                                   name = NULL) +
     ggplot2::expand_limits(y = 0) +
+    ggplot2::labs(
+      title = "E  Value of each design, vs one DiD study",
+      x = expression("Pre-post correlation " * rho),
+      y = "Information per study, relative to DiD") +
     .fig_theme()
 
   list(A = gA,   # calibration (A/F)
        B = gB,   # trend-mean sweep, bias (J)
        C = gC,   # trend-variability sweep, coverage (M)
        D = gI,   # trend-variability sweep, RMSE (M)
-       E = gD,   # information from incomplete designs (K)
+       E = gD,   # composition sweeps, low vs high heterogeneity (K, S)
        F = gJ,   # pure-null interval premium (R)
        G = gK,   # trend plane, full model bias (Q)
        H = gL,   # trend plane, naive model bias (Q)
        I = gM,   # trend plane, which model to use (Q)
-       S = gS)   # composition sweep, high effect heterogeneity (S)
+       U = gU)   # per-design exchange rate vs rho (U)
 }
 
 illustration_panels <- function(draws) {
@@ -807,15 +876,16 @@ illustration_panels <- function(draws) {
 #' @param all_agg Aggregated results tibble.
 #' @param illustration Draws tibble from run_illustration().
 #' @return A patchwork object (6 panels, 2 rows x 3 columns).
-plot_figure1 <- function(all_agg, illustration, paired = NULL) {
-  p  <- paper_panels(all_agg, paired)
+plot_figure1 <- function(all_agg, illustration, paired = NULL,
+                         q_tol_frac = Q_TOL_FRAC) {
+  p  <- paper_panels(all_agg, paired, q_tol_frac)
   il <- illustration_panels(illustration)
   patchwork::wrap_plots(
     .retitle(il$split,  "A  Stratified inference"),
-    .retitle(p$E, expression(bold("B  Marginal study information for low ") * bold(tau[theta]))),
+    .retitle(p$E, expression(bold("B  Marginal value of incomplete designs, low vs high ") * bold(tau[theta]))),
     .retitle(p$F, "C  Zero time trends"),
     .retitle(il$pooled, "D  Pooled inference"),
-    .retitle(p$S, expression(bold("E  Marginal study information for high ") * bold(tau[theta]))),
+    .retitle(p$U, "E  Value of each design, vs one DiD study"),
     .retitle(p$D, "F  Mean zero time trends"),
     ncol = 3
   )
@@ -825,8 +895,8 @@ plot_figure1 <- function(all_agg, illustration, paired = NULL) {
 #'
 #' @param all_agg Aggregated results tibble.
 #' @return A patchwork object (3 panels).
-plot_figure2 <- function(all_agg) {
-  p <- paper_panels(all_agg)
+plot_figure2 <- function(all_agg, q_tol_frac = Q_TOL_FRAC) {
+  p <- paper_panels(all_agg, q_tol_frac = q_tol_frac)
   patchwork::wrap_plots(
     .retitle(p$G, "A  metadid bias"),
     .retitle(p$H, "B  naive bias"),
@@ -864,7 +934,8 @@ plot_figure2 <- function(all_agg) {
 #' @param out Directory to write figures to (defaults to `dir`).
 #' @param save Write PNG/PDF files; FALSE just returns the plot objects.
 #' @return Invisibly, a list of the two patchwork objects.
-render_paper_figures <- function(dir = "output", out = dir, save = TRUE) {
+render_paper_figures <- function(dir = "output", out = dir, save = TRUE,
+                                 q_tol_frac = Q_TOL_FRAC) {
   rd <- function(f, required = TRUE) {
     path <- file.path(dir, f)
     if (!file.exists(path)) {
@@ -878,8 +949,9 @@ render_paper_figures <- function(dir = "output", out = dir, save = TRUE) {
   paired <- rd("paired_contrasts.csv", required = FALSE)
 
   figs <- list(
-    figure1 = list(plot = plot_figure1(agg, illus, paired), w = 13, h = 9),
-    figure2 = list(plot = plot_figure2(agg),                w = 13, h = 5)
+    figure1 = list(plot = plot_figure1(agg, illus, paired, q_tol_frac),
+                   w = 13, h = 9),
+    figure2 = list(plot = plot_figure2(agg, q_tol_frac), w = 13, h = 5)
   )
   if (save) {
     dir.create(out, showWarnings = FALSE, recursive = TRUE)
@@ -892,4 +964,31 @@ render_paper_figures <- function(dir = "output", out = dir, save = TRUE) {
     }
   }
   invisible(lapply(figs, `[[`, "plot"))
+}
+
+#' How the panel-I regions respond to the bias tolerance
+#'
+#' The "which model to use" map depends on a judgement call -- how much bias in
+#' mu_theta is tolerable -- not on the data alone. This tabulates the region
+#' counts across candidate tolerances so the choice can be made on evidence and
+#' stated in the caption, rather than left implicit at whatever the default is.
+#' Runs entirely from an existing figure_panels.csv; no simulation needed.
+#'
+#' @param all_agg Aggregated results (or the contents of figure_panels.csv).
+#' @param fracs Candidate values of q_tol_frac.
+#' @return Tibble: one row per tolerance, one column per region, plus the
+#'   absolute bias threshold that tolerance implies.
+q_tolerance_scan <- function(all_agg, fracs = c(0.05, 0.10, 0.15, 0.20,
+                                                0.25, 0.33, 0.50)) {
+  purrr::map_dfr(fracs, function(f) {
+    d <- paper_panels(all_agg, q_tol_frac = f)$I$data
+    if (!nrow(d)) return(tibble::tibble(q_tol_frac = f))
+    truth <- stats::median(abs(all_agg$true_value), na.rm = TRUE)
+    tibble::tibble(q_tol_frac = f, abs_threshold = f * truth) |>
+      dplyr::bind_cols(
+        as.list(table(factor(d$region,
+          levels = c("Either works", "metadid better", "naive better",
+                     "Neither usable: drop PP"))))
+      )
+  })
 }

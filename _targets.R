@@ -490,6 +490,17 @@ list(
   ),
   tar_target(R_agg, aggregate_scenario(R_rep)),
 
+  # ---- Category U: per-design exchange rate vs rho (panel E) ----
+  tarchetypes::tar_map_rep(
+    name    = U_rep,
+    command = run_one_rep(scenario_id, config, targets::tar_seed_get(), metadid_src),
+    values  = scenario_values(scenario_ids("U")),
+    names   = tidyselect::any_of("scenario_id"),
+    batches = N_REPS_FIG,
+    reps    = 1
+  ),
+  tar_target(U_agg, aggregate_scenario(U_rep)),
+
   # ---- Category T: M sweep at a PP-heavy composition (panel F) ----
   tarchetypes::tar_map_rep(
     name    = T_rep,

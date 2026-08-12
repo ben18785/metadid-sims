@@ -1762,6 +1762,63 @@ for (.i in seq_len(nrow(R_GRID))) {
 rm(.i, .nd, .np)
 
 # ---------------------------------------------------------------------------
+# Category U: what each incomplete design is worth (figure panel E)
+#
+# Per-study sampling variance of the theta contribution, with n per arm,
+# within-subject SD sigma and pre-post correlation rho:
+#
+#   DiD  (pre+post, both arms)   4 sigma^2 (1 - rho) / n
+#   RCT  (post only, both arms)  2 sigma^2 / n
+#   PP   (pre+post, treated)     2 sigma^2 (1 - rho) / n
+#
+# so, as information relative to one DiD study,
+#
+#   PP  / DiD = 2            (flat in rho)
+#   RCT / DiD = 2 (1 - rho)  (crosses parity at rho = 0.5)
+#
+# The DEFAULT rho of 0.5 sits exactly on that crossover, which is why the
+# existing K splits cannot rank DiD against post-only RCTs. Sweeping rho puts
+# each design's exchange rate on a measurable axis; the gap between the
+# measured curve and the analytic line above is the price of incompleteness
+# (PP must borrow the trend, the RCT must accommodate baseline imbalance).
+#
+# Deliberately run at the DEFAULT sigma_effect: the exchange rate only means
+# anything while sampling variance dominates. Under high effect heterogeneity
+# every design converges to parity, which is what category S shows.
+# ---------------------------------------------------------------------------
+U_CORES <- c(5L, 20L)   # DiD anchor sizes: weak and strong
+U_ADD   <- 20L          # studies added, of whichever design
+U_RHO   <- c(0.2, 0.35, 0.5, 0.65, 0.8)
+
+# Two anchor levels because PP's ceiling of 2 assumes the trend is KNOWN. In
+# practice it is estimated from the anchor, and that uncertainty is charged to
+# every PP study. With a weak anchor the measured PP curve should sit well
+# below its analytic line; with a strong one it should approach it. That is
+# what stops the panel reading as "just collect pre-post studies".
+#
+# The anchor size is encoded in the scenario id (U05_..., U20_...) rather than
+# carried in the dgp, so nothing unexpected is passed through to the simulator.
+for (.core in U_CORES) {
+  for (.r in U_RHO) {
+    .tag <- paste0(sprintf("%02d", .core), "_",
+                   sub("\\.", "", format(.r, nsmall = 2)))
+    .arms <- list(
+      core = list(n_did = .core),
+      did  = list(n_did = .core + U_ADD),
+      rct  = list(n_did = .core, n_rct = U_ADD),
+      pp   = list(n_did = .core, n_pp  = U_ADD)
+    )
+    for (.a in names(.arms)) {
+      SCENARIO_CONFIGS[[paste0("U", .tag, "_", .a)]] <- scenario(
+        sprintf("Figure panel E: anchor %d DiD, rho = %s, %s", .core, .r, .a),
+        dgp = modifyList(list(rho = .r), .arms[[.a]])
+      )
+    }
+  }
+}
+rm(.core, .r, .tag, .arms, .a)
+
+# ---------------------------------------------------------------------------
 # Category T: the M sweep at a PP-heavy composition (figure panel F)
 #
 # Identical to M (mu_beta = 0, sigma_beta swept) but with 5 DiD + 25 PP instead

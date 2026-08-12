@@ -61,7 +61,11 @@ jobs:
           - name: R
             regex: '^R_'
           - name: S
-            regex: '^S_' 
+            regex: '^S_'
+          - name: Ua
+            regex: '^U_rep_U05_'
+          - name: Ub
+            regex: '^U_rep_U20_' 
     env:
       N_REPS_FIG: ${{ inputs.reps }}
     steps:
@@ -239,7 +243,7 @@ jobs:
 
             # Build the sweep aggregates (cached from the category jobs).
             tar_make(names = c("K_agg", "M_agg",
-                               "Q_agg", "R_agg", "S_agg",
+                               "Q_agg", "R_agg", "S_agg", "U_agg",
                                "paired_contrasts", "illustration_draws"))
 
             tar_source("R/scenarios.R")
@@ -251,7 +255,8 @@ jobs:
               mutate(tar_read(K_agg), category = "K"),
               mutate(tar_read(R_agg), category = "R"),
               mutate(tar_read(Q_agg), category = "Q"),
-              mutate(tar_read(S_agg), category = "S")
+              mutate(tar_read(S_agg), category = "S"),
+              mutate(tar_read(U_agg), category = "U")
             )
 
             all_agg <- sweeps
