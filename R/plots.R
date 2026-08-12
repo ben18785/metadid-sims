@@ -595,14 +595,18 @@ paper_panels <- function(all_agg, paired = NULL, q_tol_frac = Q_TOL_FRAC) {
     bquote(tau[theta] == .(v_se) ~ "," ~ .(V_CORE) ~ "DiD core"),
     bquote(tau[theta] == .(s_se) ~ "," ~ .(S_CORE) ~ "DiD core")
   )
+  # six series (3 settings x 2 curves) land on the same x values, so a small
+  # dodge stops them stacking -- most visibly at x = 0 where the two low-tau
+  # settings and the reference all coincide
+  .pdodge <- ggplot2::position_dodge(width = 6)
   gD <- ggplot2::ggplot(pd, ggplot2::aes(added, mean_posterior_sd,
                                          colour = setting, linetype = curve)) +
-    ggplot2::geom_line(linewidth = 0.5) +
+    ggplot2::geom_line(linewidth = 0.5, position = .pdodge) +
     # +/- 1.96 MC standard errors of the mean across replicates.
     ggplot2::geom_pointrange(
       ggplot2::aes(ymin = mean_posterior_sd - 1.96 * se_posterior_sd,
                    ymax = mean_posterior_sd + 1.96 * se_posterior_sd),
-      size = 0.35, linewidth = 0.4, na.rm = TRUE) +
+      size = 0.35, linewidth = 0.4, na.rm = TRUE, position = .pdodge) +
     ggplot2::scale_colour_manual(
       values = c(k = "#0072B2", v = "#009E73", s = "#D55E00"),
       labels = pd_labs, name = NULL) +
@@ -611,6 +615,11 @@ paper_panels <- function(all_agg, paired = NULL, q_tol_frac = Q_TOL_FRAC) {
       labels = c("RCT + PP" = "mixed: RCT + PP added",
                  "DiD (reference)" = "DiD added (reference)"),
       name = NULL) +
+    # log scale: the three settings span roughly an 8-fold range of posterior
+    # SD, so on a linear axis the low-tau curves compress into the floor and
+    # overlap. On a log axis the mixed-vs-reference GAP -- which is the point
+    # of the panel -- is a constant visual distance at every level.
+    ggplot2::scale_y_log10() +
     ggplot2::guides(colour = ggplot2::guide_legend(nrow = 2, order = 1),
                     linetype = ggplot2::guide_legend(nrow = 2, order = 2)) +
     ggplot2::labs(title = "B  Marginal value of incomplete designs (K, V, S)",
@@ -707,7 +716,9 @@ paper_panels <- function(all_agg, paired = NULL, q_tol_frac = Q_TOL_FRAC) {
     ggplot2::labs(title = "F  Pure null: interval premium (R)",
                   x = "DiD studies",
                   y = "90% CrI width, metadid / naive") +
-    .fig_theme()
+    .fig_theme() +
+    # .fig_theme() blanks legend titles; without it these read as bare numbers
+    ggplot2::theme(legend.title = ggplot2::element_text(size = 8))
 
   # --- K/L: bias over the trend plane (Q) ---------------------------------
   # Each model is unbiased only on its own line: the full model along the
@@ -815,8 +826,9 @@ paper_panels <- function(all_agg, paired = NULL, q_tol_frac = Q_TOL_FRAC) {
   # and (6.5) of docs/design-information-derivation.docx. Set show_measured to
   # overlay the simulated points; nothing does at present.
   .exchange_panel <- function(designs, ttl, facet = FALSE,
-                              show_measured = FALSE) {
-    lab_anchor <- function(x) paste(x, "DiD anchor")
+                              show_measured = FALSE,
+                              nuisance = "borrowed quantity") {
+    lab_anchor <- function(x) paste(x, "DiD")
     th <- dplyr::filter(u_th, design %in% designs) |>
       dplyr::mutate(anchor = factor(lab_anchor(anchor)))
     ce <- dplyr::filter(u_ceil, design %in% designs)
@@ -824,12 +836,11 @@ paper_panels <- function(all_agg, paired = NULL, q_tol_frac = Q_TOL_FRAC) {
       ggplot2::geom_hline(yintercept = 1, linetype = "dashed",
                           colour = "#6b6b6b") +
       # ceiling: what the design would be worth if the nuisance were KNOWN
-      ggplot2::geom_line(data = ce, ggplot2::aes(linetype = "nuisance known"),
+      ggplot2::geom_line(data = ce, ggplot2::aes(linetype = .lt[1]),
                          colour = "#6b6b6b", linewidth = 0.45) +
       # realised: the nuisance is estimated from the anchor
       ggplot2::geom_line(data = th,
-                         ggplot2::aes(colour = anchor,
-                                      linetype = "nuisance estimated"),
+                         ggplot2::aes(colour = anchor, linetype = .lt[2]),
                          linewidth = 0.7)
     if (show_measured) {
       m <- dplyr::filter(pu_all, design %in% designs) |>
@@ -838,13 +849,24 @@ paper_panels <- function(all_agg, paired = NULL, q_tol_frac = Q_TOL_FRAC) {
         ggplot2::geom_point(data = m, ggplot2::aes(colour = anchor), size = 1.6,
                             na.rm = TRUE)
     }
+    # label the anchor curves in place, so the legend carries only the
+    # distinction that needs explaining
+    .lt <- paste(nuisance, c("assumed known", "estimated"))
+    ends <- th |>
+      dplyr::group_by(design, anchor) |>
+      dplyr::filter(rho == max(rho)) |>
+      dplyr::ungroup()
     g <- g +
+      ggplot2::geom_text(data = ends,
+                         ggplot2::aes(label = anchor, colour = anchor),
+                         hjust = -0.15, size = 2.7, show.legend = FALSE) +
       ggplot2::scale_colour_manual(values = c("#9ECAE1", "#08519C"),
-                                   name = NULL) +
+                                   guide = "none") +
       ggplot2::scale_linetype_manual(
-        values = c("nuisance known" = "dotdash",
-                   "nuisance estimated" = "solid"),
-        breaks = c("nuisance known", "nuisance estimated"), name = NULL) +
+        values = stats::setNames(c("dotdash", "solid"), .lt),
+        breaks = .lt, name = NULL) +
+      ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = c(0.02, 0.14))) +
+      ggplot2::scale_y_continuous(breaks = seq(0, 1.4, 0.2)) +
       ggplot2::expand_limits(y = 0) +
       ggplot2::labs(title = ttl,
                     x = expression("Pre-post correlation " * rho),
@@ -854,7 +876,8 @@ paper_panels <- function(all_agg, paired = NULL, q_tol_frac = Q_TOL_FRAC) {
     g
   }
   gU  <- .exchange_panel("RCT (post-only)",
-                         "E  Value of a post-only RCT, vs one DiD study")
+                         "E  Value of a post-only RCT, vs one DiD study",
+                         nuisance = "baseline imbalance")
   gU2 <- .exchange_panel(c("PP", "RCT (post-only)"),
                          "Value of each incomplete design, vs one DiD study",
                          facet = TRUE)
