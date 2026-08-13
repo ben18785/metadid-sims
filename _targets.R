@@ -425,11 +425,30 @@ list(
   tar_target(L_agg, aggregate_scenario(L_rep)),
 
   # ---- Category M: figure sweep (panels C and F; extra reps) ----
-  tarchetypes::tar_map_rep(
-    name    = M_rep,
-    command = run_one_rep(scenario_id, config, targets::tar_seed_get(), metadid_src),
-    values  = scenario_values(scenario_ids("M")),
-    names   = tidyselect::any_of("scenario_id"),
+  #
+  # COMMON RANDOM NUMBERS. tar_map_rep gives each scenario its own seed, so
+  # every point of the sigma_beta sweep carries independent Monte Carlo error
+  # and the resulting curve is jagged -- a bump at sigma_beta = 0.06 in one run
+  # was traced to exactly this and did not reproduce on fresh seeds.
+  #
+  # tar_rep instead draws ONE seed per batch (verified: tar_seed_get() is
+  # constant within a batch and varies between them), and every scenario in
+  # that batch is simulated from it. Each scenario is still an unbiased draw
+  # from its own DGP -- this is variance reduction on the DIFFERENCES across
+  # the sweep, not seed selection, and the choice is made a priori rather than
+  # by inspecting the output.
+  #
+  # Cost: one target per batch covering all M scenarios, so per-scenario
+  # caching is lost. With six scenarios that is an acceptable trade.
+  tarchetypes::tar_rep(
+    M_rep,
+    {
+      .s <- targets::tar_seed_get()
+      .pkg <- metadid_src            # dependency edge on the metadid source
+      dplyr::bind_rows(lapply(scenario_ids("M"), function(.id) {
+        run_one_rep(.id, SCENARIO_CONFIGS[[.id]], rep_seed = .s, pkg = .pkg)
+      }))
+    },
     batches = N_REPS_FIG_M,
     reps    = 1
   ),

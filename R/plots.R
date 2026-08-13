@@ -457,6 +457,38 @@ Q_TOL_FRAC <- 0.15
                         values_to = "ratio")
 }
 
+# Region assignment for the model-choice map, shared by the Figure 2 panel and
+# the tolerance-sensitivity supplement so the two cannot diverge.
+#
+# `q_tol_frac` is the tolerable |bias| as a fraction of the true effect. It is a
+# judgement call, not a property of the data, and is applied at PLOT time -- so
+# it can be varied against an existing figure_panels.csv with no re-simulation.
+.Q_REGION_COLS <- c("Either works"     = "#009E73",
+                    "metadid better"   = "#0072B2",
+                    "naive better"     = "#D55E00",
+                    "Analyse DiD only" = "#4d4d4d")
+
+.q_regions <- function(pq, q_tol_frac) {
+  empty <- tibble::tibble(x = numeric(), y = numeric(), region = character())
+  if (!nrow(pq)) return(empty)
+  q_tol <- q_tol_frac * stats::median(abs(pq$true_value), na.rm = TRUE)
+  pm <- pq |>
+    dplyr::select(scenario_id, model_label, mean_bias, x, y) |>
+    tidyr::pivot_wider(names_from = model_label, values_from = mean_bias)
+  if (!.has_arms(pm)) return(empty)
+  # Four regions, not three. Where BOTH models are inside tolerance the choice
+  # does not matter, and collapsing that into "metadid better" on a
+  # hair's-breadth difference overstates the case. Where NEITHER is, the PP
+  # studies carry no usable information about theta and the fallback is a
+  # DiD-only analysis, which differences out its own trend and so is unbiased
+  # anywhere on this plane.
+  dplyr::mutate(pm, region = dplyr::case_when(
+    pmax(abs(full), abs(naive)) <= q_tol ~ "Either works",
+    pmin(abs(full), abs(naive)) >  q_tol ~ "Analyse DiD only",
+    abs(full) <= abs(naive)              ~ "metadid better",
+    TRUE                                 ~ "naive better"))
+}
+
 #' @param all_agg Aggregated results tibble (scenario x model x parameter).
 #' @return Named list of ggplot objects, one per panel letter.
 #'
@@ -612,8 +644,8 @@ paper_panels <- function(all_agg, paired = NULL, q_tol_frac = Q_TOL_FRAC) {
       labels = pd_labs, name = NULL) +
     ggplot2::scale_linetype_manual(
       values = c("RCT + PP" = "solid", "DiD (reference)" = "dashed"),
-      labels = c("RCT + PP" = "mixed: RCT + PP added",
-                 "DiD (reference)" = "DiD added (reference)"),
+      labels = c("RCT + PP" = "RCT + PP added",
+                 "DiD (reference)" = "DiD added"),
       name = NULL) +
     # log scale: the three settings span roughly an 8-fold range of posterior
     # SD, so on a linear axis the low-tau curves compress into the floor and
@@ -774,38 +806,14 @@ paper_panels <- function(all_agg, paired = NULL, q_tol_frac = Q_TOL_FRAC) {
   # the PP studies carry no usable information about theta and the fallback
   # is a DiD-only analysis, which differences out its own trend and so is
   # unbiased anywhere on this plane.
-  # Tolerable |bias| as a fraction of the true effect. This is a judgement
-  # call, not a property of the data -- it is a plot-time argument so it can be
-  # varied against an existing figure_panels.csv without rerunning anything.
-  q_tol <- q_tol_frac * stats::median(abs(pq$true_value), na.rm = TRUE)
-  pm <- pq |>
-    dplyr::select(scenario_id, model_label, mean_bias, x, y) |>
-    tidyr::pivot_wider(names_from = model_label, values_from = mean_bias)
-  pm <- if (.has_arms(pm)) {
-    # Four regions, not three. Where BOTH models are inside tolerance the
-    # honest answer is that the choice does not matter -- collapsing that into
-    # "metadid better" on a hair's-breadth difference overstates the case.
-    dplyr::mutate(pm, region = dplyr::case_when(
-      pmax(abs(full), abs(naive)) <= q_tol ~ "Either works",
-      pmin(abs(full), abs(naive)) >  q_tol ~ "Neither usable: drop PP",
-      abs(full) <= abs(naive)              ~ "metadid better",
-      TRUE                                 ~ "naive better"
-    ))
-  } else {
-    tibble::tibble(x = numeric(), y = numeric(), region = character())
-  }
+  pm <- .q_regions(pq, q_tol_frac)
   gM <- ggplot2::ggplot(pm, ggplot2::aes(x, y, fill = region)) +
     ggplot2::geom_tile(colour = "white", linewidth = 0.4) +
     ggplot2::geom_abline(slope = 1, intercept = 0, colour = "#111111",
                          linewidth = 0.6) +
     ggplot2::geom_hline(yintercept = 0, colour = "#111111", linewidth = 0.6) +
-    ggplot2::scale_fill_manual(values = c(
-      "Either works"            = "#009E73",
-      "metadid better"          = "#0072B2",
-      "naive better"            = "#D55E00",
-      "Neither usable: drop PP" = "#4d4d4d"),
-      breaks = c("Either works", "metadid better", "naive better",
-                 "Neither usable: drop PP"), name = NULL) +
+    ggplot2::scale_fill_manual(values = .Q_REGION_COLS,
+                               breaks = names(.Q_REGION_COLS), name = NULL) +
     ggplot2::coord_fixed() +
     ggplot2::labs(
       title = "I  Which model to use (Q)",
@@ -932,7 +940,9 @@ illustration_panels <- function(draws) {
   # Shared x range across BOTH panels, computed from every arm, so the split
   # and pooled panels can be compared directly rather than each self-scaling.
   xr <- range(d$draw, na.rm = TRUE)
-  xr <- xr + c(-1, 1) * 0.04 * diff(xr)
+  # generous padding: labels for overlapping densities are nudged sideways
+  # (see mk() below) and would otherwise be clipped by coord_cartesian()
+  xr <- xr + c(-1, 1) * 0.10 * diff(xr)
 
   mk <- function(models, ttl, legend_rows = 1L) {
     dd <- d |> dplyr::filter(model %in% unname(lab[models])) |>
@@ -945,7 +955,8 @@ illustration_panels <- function(draws) {
       dplyr::summarise(
         x = { k <- stats::density(draw, adjust = 1.2); k$x[which.max(k$y)] },
         y = { k <- stats::density(draw, adjust = 1.2); max(k$y) },
-        .groups = "drop")
+        .groups = "drop") |>
+      dplyr::mutate(short_lab = short[as.character(model)])
     ggplot2::ggplot(dd, ggplot2::aes(draw, colour = model, fill = model)) +
       ggplot2::geom_density(alpha = 0.25, adjust = 1.2, linewidth = 0.6) +
       ggplot2::geom_vline(xintercept = truth, linetype = "dashed",
@@ -953,10 +964,22 @@ illustration_panels <- function(draws) {
       ggrepel::geom_text_repel(
         data = peaks,
         ggplot2::aes(x, y, label = short[as.character(model)], colour = model),
-        inherit.aes = FALSE, size = 2.7, seed = 1L, direction = "y",
-        nudge_y = 0.1 * max(peaks$y), min.segment.length = 0.5,
+        inherit.aes = FALSE, size = 2.7, seed = 1L,
+        # In the pooled panel three densities pile up around the truth. Push
+        # the naive hump's label left and metadid's right, out over open space,
+        # so neither collides with a curve or with the oracle label.
+        # Push labels off the curves AND off the dashed truth line. The
+        # DiD-only and oracle densities peak next to the truth, so their
+        # labels land on it unless nudged left.
+        nudge_x = dplyr::case_when(
+          peaks$short_lab == "metadid"            ~  0.11 * diff(xr),
+          peaks$short_lab == "naive"              ~ -0.09 * diff(xr),
+          grepl("^oracle", peaks$short_lab)       ~ -0.13 * diff(xr),
+          grepl("^[0-9]+ DiD$", peaks$short_lab)  ~ -0.10 * diff(xr),
+          TRUE                                    ~  0),
+        nudge_y = 0.08 * max(peaks$y), min.segment.length = 0.2,
         segment.colour = "#b0b0b0", segment.size = 0.25,
-        box.padding = 0.3, point.padding = 0.2, show.legend = FALSE) +
+        box.padding = 0.25, point.padding = 0.2, show.legend = FALSE) +
       ggplot2::scale_colour_manual(values = cols, guide = "none") +
       ggplot2::scale_fill_manual(values = cols, guide = "none") +
       ggplot2::coord_cartesian(xlim = xr) +
@@ -992,19 +1015,67 @@ illustration_panels <- function(draws) {
 #' @param all_agg Aggregated results tibble.
 #' @param illustration Draws tibble from run_illustration().
 #' @return A patchwork object (6 panels, 2 rows x 3 columns).
+# A tinted strip carrying the column letter, in the manner of a facet strip.
+# Tinting the whole column instead leaves no gutter between columns and reads
+# as one continuous field, which defeats the grouping.
+.col_header <- function(label) {
+  ggplot2::ggplot() +
+    ggplot2::annotate("text", x = 0, y = 0, label = label, fontface = "bold",
+                      size = 3.3, colour = "#1a1a1a", hjust = 0,
+                      lineheight = 1.05) +
+    ggplot2::scale_x_continuous(limits = c(0, 1)) +
+    ggplot2::theme_void() +
+    ggplot2::theme(
+      plot.background = ggplot2::element_rect(fill = "#ececec", colour = NA),
+      plot.margin = ggplot2::margin(5, 4, 5, 6))
+}
+
+# Thin rule between columns, so the three arguments read as separate blocks.
+.col_sep <- function(rule = TRUE) {
+  g <- ggplot2::ggplot() + ggplot2::theme_void()
+  if (rule) {
+    g <- g + ggplot2::geom_vline(xintercept = 0, colour = "#cfcfcf",
+                                 linewidth = 0.4)
+  }
+  g
+}
+
 plot_figure1 <- function(all_agg, illustration, paired = NULL,
                          q_tol_frac = Q_TOL_FRAC) {
   p  <- paper_panels(all_agg, paired, q_tol_frac)
   il <- illustration_panels(illustration)
-  patchwork::wrap_plots(
-    .retitle(il$split,  "A  With a time trend, DiD and pre-post\n     studies give different results"),
-    .retitle(p$E, "B  Adding other designs helps most with few\n     DiD studies or heterogeneous effects"),
-    .retitle(p$F, "C  Modelling a trend, metadid matches the\n     no-trend CI given enough DiD studies"),
-    .retitle(il$pooled, "D  Pooling with metadid estimates the effect\n     more precisely"),
-    .retitle(p$U, "E  Post-only RCTs are most informative when\n     pre-post correlation is low"),
-    .retitle(p$D, "F  With zero-mean variable trends, metadid\n     improves on naive quickly"),
-    ncol = 3
+  # Panels carry no letter of their own: the COLUMN is the unit of argument,
+  # so the letter labels the column and the two panels beneath it are read
+  # together.
+  cols <- list(
+    A = list(.retitle(il$split,
+                      "With a time trend, DiD and pre-post\nstudies give different results"),
+             .retitle(il$pooled,
+                      "Pooling with metadid estimates the\neffect more precisely")),
+    B = list(.retitle(p$E,
+                      "Adding other designs helps most with\nfew DiD studies or heterogeneous effects"),
+             .retitle(p$U,
+                      "Post-only RCTs are most informative\nwhen pre-post correlation is low")),
+    C = list(.retitle(p$F,
+                      "Modelling a trend, metadid matches the\nno-trend CI given enough DiD studies"),
+             .retitle(p$D,
+                      "With zero-mean variable trends, metadid\nimproves on naive quickly"))
   )
+  # One 3x3 grid (header row + two panel rows) rather than three independent
+  # column patchworks: nesting by column lets each column size its own rows,
+  # so panels stop lining up across the figure wherever a legend differs.
+  hdr <- c(
+    A = "A   Pooling data across designs in the right way\n      leads to robust estimates",
+    B = "B   There is value from pooling other designs\n      with DiD studies",
+    C = "C   metadid performs reasonably even when there\n      are not strong time trends")
+  patchwork::wrap_plots(
+    .col_header(hdr[["A"]]), .col_sep(FALSE),
+    .col_header(hdr[["B"]]), .col_sep(FALSE),
+    .col_header(hdr[["C"]]),
+    cols$A[[1]], .col_sep(), cols$B[[1]], .col_sep(), cols$C[[1]],
+    cols$A[[2]], .col_sep(), cols$B[[2]], .col_sep(), cols$C[[2]],
+    ncol = 5, widths = c(1, 0.03, 1, 0.03, 1),
+    heights = c(0.14, 1, 1))
 }
 
 #' Supplementary figure: the exchange rate for both incomplete designs
@@ -1079,8 +1150,19 @@ render_paper_figures <- function(dir = "output", out = dir, save = TRUE,
   figs <- list(
     figure1 = list(plot = plot_figure1(agg, illus, paired, q_tol_frac),
                    w = 13, h = 9),
-    figure2 = list(plot = plot_figure2(agg, q_tol_frac), w = 13, h = 5),
+    # analytic trend plane is the main-text figure 2; the simulated grid that
+    # validates it goes to the SI
+    figure2 = list(plot = plot_figure2_theory(q_tol_frac = q_tol_frac),
+                   w = 13, h = 5),
+    figure_si_simulated_plane = list(plot = plot_figure2(agg, q_tol_frac),
+                                     w = 13, h = 5),
     figure_si = list(plot = plot_figure_si(agg), w = 9, h = 4.6),
+    figure_si_tolerance = list(plot = plot_figure_si_tolerance(agg),
+                               w = 10, h = 7),
+    figure_si_composition = list(plot = plot_figure_si_composition(q_tol_frac = q_tol_frac),
+                                 w = 10, h = 9.5),
+    figure_si_heterogeneity = list(plot = plot_figure_si_heterogeneity(q_tol_frac = q_tol_frac),
+                                   w = 10, h = 9.5),
     # theory vs simulation, one per incomplete design
     figure_val_pp  = list(plot = plot_design_validation(agg, "PP", ratios),
                           w = 10, h = 8),
@@ -1122,7 +1204,7 @@ q_tolerance_scan <- function(all_agg, fracs = c(0.05, 0.10, 0.15, 0.20,
       dplyr::bind_cols(
         as.list(table(factor(d$region,
           levels = c("Either works", "metadid better", "naive better",
-                     "Neither usable: drop PP"))))
+                     "Analyse DiD only"))))
       )
   })
 }
@@ -1229,4 +1311,273 @@ plot_design_validation <- function(all_agg, design = "PP", ratios = NULL) {
       title = paste0("Theory vs simulation: ", design),
       theme = ggplot2::theme(
         plot.title = ggplot2::element_text(face = "bold", size = 11)))
+}
+
+#' Supplementary figure: how the model-choice map depends on the tolerance
+#'
+#' The map in Figure 2C rests on a judgement -- how much bias in mu_theta is
+#' tolerable -- and that judgement sits on a steep part of the curve rather
+#' than a flat one, so the map is genuinely sensitive to it. Rather than defend
+#' one value, show the map across a range and let the reader locate their own.
+#'
+#' Costs no simulation: the threshold is applied at plot time to `mean_bias`,
+#' which is already in figure_panels.csv.
+#'
+#' @param all_agg Aggregated results tibble.
+#' @param fracs Tolerances to show, as fractions of the true effect.
+#' @return A ggplot object, faceted by tolerance.
+plot_figure_si_tolerance <- function(all_agg,
+                                     fracs = c(0.05, 0.10, 0.15,
+                                               0.20, 0.25, 0.33)) {
+  te <- dplyr::filter(all_agg, parameter == "treatment_effect_mean")
+  q_ids <- scenario_ids("Q")
+  q_xy <- purrr::map_dfr(q_ids, function(id) {
+    d <- SCENARIO_CONFIGS[[id]]$dgp
+    tibble::tibble(scenario_id = id,
+                   x = d$did_trend / .fig_base(id),
+                   y = d$pp_trend  / .fig_base(id))
+  })
+  pq <- te |>
+    dplyr::filter(scenario_id %in% q_ids) |>
+    dplyr::left_join(q_xy, by = "scenario_id")
+
+  dat <- purrr::map_dfr(fracs, function(f) {
+    r <- .q_regions(pq, f)
+    if (!nrow(r)) return(r)
+    dplyr::mutate(r, panel = sprintf("tolerance = %.0f%% of the true effect",
+                                     100 * f))
+  })
+  if (nrow(dat)) {
+    dat$panel <- factor(dat$panel,
+                        levels = sprintf("tolerance = %.0f%% of the true effect",
+                                         100 * fracs))
+  }
+  ggplot2::ggplot(dat, ggplot2::aes(x, y, fill = region)) +
+    ggplot2::geom_tile(colour = "white", linewidth = 0.3) +
+    ggplot2::geom_abline(slope = 1, intercept = 0, colour = "#111111",
+                         linewidth = 0.5) +
+    ggplot2::geom_hline(yintercept = 0, colour = "#111111", linewidth = 0.5) +
+    ggplot2::scale_fill_manual(values = .Q_REGION_COLS,
+                               breaks = names(.Q_REGION_COLS), name = NULL) +
+    ggplot2::facet_wrap(~ panel) +
+    ggplot2::coord_fixed() +
+    ggplot2::labs(
+      title = "Sensitivity of the model-choice map to the bias tolerance",
+      x = "Mean time trend, DiD (normalised)",
+      y = "Mean time trend, pre-post (normalised)") +
+    .fig_theme() +
+    ggplot2::theme(panel.grid = ggplot2::element_blank(),
+                   strip.text = ggplot2::element_text(size = 8))
+}
+
+# ===========================================================================
+# Analytic version of the trend plane
+# ===========================================================================
+
+#' Inverse-variance weight on the PP block, for each model
+#'
+#' The pooled estimate is a weighted mean with weights 1/(tau_theta^2 + s^2),
+#' so the bias a contaminated block induces is its weight share times its
+#' contamination. metadid's PP studies additionally carry the uncertainty of
+#' the borrowed trend, so their information is discounted first (equation 6.4
+#' of docs/design-information-derivation.docx).
+#'
+#' @param dgp A scenario dgp list.
+#' @return List with `naive` and `metadid` weight shares.
+.q_weights <- function(dgp) {
+  sig <- dgp$within_sd; n <- dgp$n_treatment; rho <- dgp$rho
+  tau <- dgp$sigma_effect; tau_b <- dgp$sigma_trend
+  nD <- dgp$n_did; nP <- dgp$n_pp
+  s2D <- 4 * sig^2 * (1 - rho) / n
+  s2P <- 2 * sig^2 * (1 - rho) / n
+  ID  <- 1 / (tau^2 + s2D)
+  IP  <- 1 / (tau^2 + s2P)
+  i_b <- 1 / (tau_b^2 + 2 * sig^2 * (1 - rho) / n)
+  disc <- (nD * i_b) / (nD * i_b + nP * IP)
+  IPe <- IP * disc
+  list(naive   = nP * IP  / (nD * ID + nP * IP),
+       metadid = nP * IPe / (nD * ID + nP * IPe),
+       discount = disc)
+}
+
+#' Analytic bias surface over the trend plane, in the shape `.q_regions` wants
+#'
+#' E[bias_naive]   = W_naive   * pp_trend
+#' E[bias_metadid] = W_metadid * (pp_trend - did_trend)
+#' both divided by the baseline to reach the normalised effect scale.
+.q_theory_pq <- function(dgp, lim = 0.14, n_grid = 61) {
+  w <- .q_weights(dgp)
+  b <- dgp$baseline_mean
+  truth <- (dgp$true_effect / b) * (1 + (dgp$baseline_sd / b)^2)
+  g <- tidyr::expand_grid(did = seq(-lim, lim, length.out = n_grid),
+                          pp  = seq(-lim, lim, length.out = n_grid))
+  # the id must identify the GRID POINT, so both arms of a point pair up in
+  # .q_regions()'s pivot -- assigning it after bind_rows() gives the two arms
+  # different ids and every cell then has a missing arm
+  g$scenario_id <- paste0("t", seq_len(nrow(g)))
+  dplyr::bind_rows(
+    dplyr::mutate(g, model_label = "full",
+                  mean_bias = w$metadid * (pp - did) / b),
+    dplyr::mutate(g, model_label = "naive",
+                  mean_bias = w$naive * pp / b)) |>
+    dplyr::mutate(x = did / b, y = pp / b, true_value = truth) |>
+    dplyr::select(scenario_id, model_label, mean_bias, x, y, true_value)
+}
+
+#' Figure 2 from theory rather than simulation
+#'
+#' Same three panels, same region logic, evaluated on a fine grid at closed
+#' form. Provided as a check on the simulated version -- the geometry (metadid
+#' unbiased on the diagonal, naive on the horizontal) should coincide.
+#'
+#' @param dgp Scenario dgp; defaults to the Q grid's.
+#' @param q_tol_frac Bias tolerance as a fraction of the true effect.
+#' @return A patchwork object (3 panels).
+plot_figure2_theory <- function(dgp = SCENARIO_CONFIGS[[scenario_ids("Q")[1]]]$dgp,
+                                q_tol_frac = Q_TOL_FRAC) {
+  pq <- .q_theory_pq(dgp)
+  lim <- max(abs(pq$mean_bias))
+  ax <- list(ggplot2::labs(x = "Mean time trend, DiD (normalised)",
+                           y = "Mean time trend, pre-post (normalised)"),
+             ggplot2::coord_fixed(), .fig_theme(),
+             ggplot2::theme(panel.grid = ggplot2::element_blank()))
+  surf <- function(arm, ttl, slope) {
+    ggplot2::ggplot(dplyr::filter(pq, model_label == arm),
+                    ggplot2::aes(x, y, fill = mean_bias)) +
+      ggplot2::geom_raster(interpolate = TRUE) +
+      # fill = NULL or geom_contour warns that it dropped the inherited fill
+      ggplot2::geom_contour(ggplot2::aes(z = mean_bias, fill = NULL),
+                            colour = "#00000030",
+                            linewidth = 0.25, breaks = seq(-1, 1, 0.05)) +
+      ggplot2::geom_abline(slope = slope, intercept = 0, colour = "#111111",
+                           linewidth = 0.6) +
+      .fig_bias_fill(lim) + ggplot2::labs(title = ttl) + ax +
+      ggplot2::theme(legend.position = "right",
+                     legend.title = ggplot2::element_text(size = 8))
+  }
+  reg <- .q_regions(pq, q_tol_frac)
+  gC <- ggplot2::ggplot(reg, ggplot2::aes(x, y, fill = region)) +
+    ggplot2::geom_raster() +
+    ggplot2::geom_abline(slope = 1, intercept = 0, colour = "#111111",
+                         linewidth = 0.6) +
+    ggplot2::geom_hline(yintercept = 0, colour = "#111111", linewidth = 0.6) +
+    ggplot2::scale_fill_manual(values = .Q_REGION_COLS,
+                               breaks = names(.Q_REGION_COLS), name = NULL) +
+    ggplot2::labs(title = "C  Where each model can be trusted") + ax
+  patchwork::wrap_plots(
+    surf("full",  "A  metadid is unbiased when PP and DiD trends agree", 1),
+    surf("naive", "B  Naive is unbiased only when PP trends are absent", 0),
+    gC, ncol = 3) +
+    patchwork::plot_layout(guides = "collect") &
+    ggplot2::theme(legend.position = "bottom")
+}
+
+#' Region maps over a grid of dgp overrides
+#'
+#' The analytic surface is free to evaluate, so a parameter sweep is just a
+#' facetted version of panel C. `grid` carries the facet labels alongside the
+#' dgp fields to override, one row per panel.
+#'
+#' @param grid Data frame with `row_label`, `col_label` and one column per dgp
+#'   field to override.
+#' @param dgp Base scenario dgp.
+#' @param q_tol_frac Bias tolerance as a fraction of the true effect.
+#' @return Long region tibble with ordered `row_label`/`col_label` factors.
+.q_sweep_regions <- function(grid, dgp, q_tol_frac) {
+  over <- setdiff(names(grid), c("row_label", "col_label"))
+  purrr::map_dfr(seq_len(nrow(grid)), function(i) {
+    d <- utils::modifyList(dgp, as.list(grid[i, over, drop = FALSE]))
+    dplyr::mutate(.q_regions(.q_theory_pq(d), q_tol_frac),
+                  row_label = grid$row_label[i], col_label = grid$col_label[i])
+  }) |>
+    dplyr::mutate(
+      # facet_grid lays rows out top-to-bottom in level order, so reversing
+      # gives the conventional reading of a row variable increasing upwards
+      row_label = factor(row_label, levels = rev(unique(grid$row_label))),
+      col_label = factor(col_label, levels = unique(grid$col_label)))
+}
+
+#' Facetted model-choice map, shared by the supplementary sweeps
+#'
+#' @param dat Output of `.q_sweep_regions`.
+#' @param title,subtitle Plot labels.
+.q_sweep_plot <- function(dat, title, subtitle = NULL) {
+  ggplot2::ggplot(dat, ggplot2::aes(x, y, fill = region)) +
+    ggplot2::geom_raster() +
+    ggplot2::geom_abline(slope = 1, intercept = 0, colour = "#111111",
+                         linewidth = 0.4) +
+    ggplot2::geom_hline(yintercept = 0, colour = "#111111", linewidth = 0.4) +
+    ggplot2::scale_fill_manual(values = .Q_REGION_COLS,
+                               breaks = names(.Q_REGION_COLS), name = NULL) +
+    ggplot2::facet_grid(row_label ~ col_label) +
+    ggplot2::coord_fixed() +
+    ggplot2::labs(title = title, subtitle = subtitle,
+                  x = "Mean time trend, DiD (normalised)",
+                  y = "Mean time trend, pre-post (normalised)") +
+    .fig_theme() +
+    ggplot2::theme(panel.grid = ggplot2::element_blank(),
+                   strip.text = ggplot2::element_text(size = 8))
+}
+
+#' Supplementary: the model-choice map across evidence-base compositions
+#'
+#' Costs nothing to compute, so the reader can locate their own evidence base
+#' rather than extrapolate from one grid. Composition scales both biases (via
+#' the weight share) while the DiD count also changes the identification
+#' discount, so the panels differ in shape as well as scale.
+#'
+#' @param n_did,n_pp Study counts to cross.
+#' @param dgp Base scenario dgp.
+#' @param q_tol_frac Bias tolerance.
+plot_figure_si_composition <- function(n_did = c(5, 10, 20),
+                                       n_pp  = c(5, 10, 20),
+                                       dgp = SCENARIO_CONFIGS[[scenario_ids("Q")[1]]]$dgp,
+                                       q_tol_frac = Q_TOL_FRAC) {
+  grid <- tidyr::expand_grid(n_pp = n_pp, n_did = n_did) |>
+    dplyr::mutate(row_label = sprintf("%d PP studies", n_pp),
+                  col_label = sprintf("%d DiD studies", n_did))
+  .q_sweep_plot(
+    .q_sweep_regions(grid, dgp, q_tol_frac),
+    sprintf("Model-choice map by evidence base (theory, tolerance = %.0f%%)",
+            100 * q_tol_frac))
+}
+
+#' Supplementary: the model-choice map across the two heterogeneity scales
+#'
+#' tau_theta (effect heterogeneity) and tau_beta (trend heterogeneity) enter
+#' the weight shares by different routes. tau_theta inflates every study's
+#' variance, so it shrinks the PP weight share in both models roughly alike and
+#' the columns barely differ. tau_beta enters only the identification discount:
+#' the noisier the DiD studies' trends, the less a borrowed trend is worth.
+#'
+#' The top row is the informative case. At tau_beta = 0.06 the discount falls to
+#' 0.09, so metadid has all but set its PP block aside and its bias goes to
+#' zero -- the model degrades gracefully to a DiD-only analysis rather than
+#' propagating a trend it cannot identify. The map shows bias only, so the
+#' precision given up in reaching that limit is figure 1F.
+#'
+#' @param tau_theta,tau_beta Heterogeneity SDs to cross.
+#' @param n_did,n_pp Evidence base held fixed across the sweep.
+#' @param dgp Base scenario dgp.
+#' @param q_tol_frac Bias tolerance.
+plot_figure_si_heterogeneity <- function(tau_theta = c(0.015, 0.03, 0.09),
+                                         tau_beta  = c(0.01, 0.02, 0.06),
+                                         n_did = 5L, n_pp = 5L,
+                                         dgp = SCENARIO_CONFIGS[[scenario_ids("Q")[1]]]$dgp,
+                                         q_tol_frac = Q_TOL_FRAC) {
+  grid <- tidyr::expand_grid(sigma_trend = tau_beta,
+                             sigma_effect = tau_theta) |>
+    dplyr::mutate(n_did = n_did, n_pp = n_pp,
+                  row_label = sprintf("tau[beta] == %.3f", sigma_trend),
+                  col_label = sprintf("tau[theta] == %.3f", sigma_effect))
+  .q_sweep_plot(
+    .q_sweep_regions(grid, dgp, q_tol_frac),
+    sprintf("Model-choice map by heterogeneity (theory, tolerance = %.0f%%)",
+            100 * q_tol_frac),
+    # ASCII only: the pdf device cannot encode Greek outside plotmath, and
+    # ggsave writes both png and pdf
+    sprintf(paste("%d DiD and %d PP studies throughout; reference scenario is",
+                  "tau_theta = %.3f, tau_beta = %.3f"),
+            n_did, n_pp, dgp$sigma_effect, dgp$sigma_trend)) +
+    ggplot2::facet_grid(row_label ~ col_label, labeller = ggplot2::label_parsed)
 }

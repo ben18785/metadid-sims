@@ -292,6 +292,9 @@ jobs:
 
       - name: Upload figure artifacts
         uses: actions/upload-artifact@v4
+        # figures are globbed rather than listed one by one:
+        # render_paper_figures() aborts if any single figure fails to render,
+        # so an explicit list only drifts as figures are added
         with:
           name: paper-figure
           path: |
@@ -299,15 +302,7 @@ jobs:
             metadid-sims/output/illustration_draws.csv
             metadid-sims/output/paired_contrasts.csv
             metadid-sims/output/design_ratios.csv
-            metadid-sims/output/figure1.png
-            metadid-sims/output/figure1.pdf
-            metadid-sims/output/figure2.png
-            metadid-sims/output/figure2.pdf
-            metadid-sims/output/figure_si.png
-            metadid-sims/output/figure_si.pdf
-            metadid-sims/output/figure_val_pp.png
-            metadid-sims/output/figure_val_pp.pdf
-            metadid-sims/output/figure_val_rct.png
-            metadid-sims/output/figure_val_rct.pdf
+            metadid-sims/output/*.png
+            metadid-sims/output/*.pdf
           if-no-files-found: error
           retention-days: 90
