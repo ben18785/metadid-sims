@@ -1762,6 +1762,64 @@ for (.i in seq_len(nrow(R_GRID))) {
 rm(.i, .nd, .np)
 
 # ---------------------------------------------------------------------------
+# Category W: does the naive weight share depend on trend heterogeneity?
+#
+# The analytic bias surface (.q_weights in R/plots.R) gives the naive model an
+# inverse-variance weight share built from 1 / (tau_theta^2 + s^2). tau_beta
+# never enters it, so the supplementary heterogeneity map has a naive band of
+# EXACTLY constant height down every column. That is an assumption, not a
+# result: the naive model sees PP "effects" of theta_i + beta_i, whose between-
+# study variance is tau_theta^2 + tau_beta^2, and it estimates its heterogeneity
+# from the data rather than being told the true tau_theta.
+#
+# The expectation is that the error is small, because the naive model fits ONE
+# common tau across both blocks (it cannot tell PP from DiD), so the inflation
+# lands on numerator and denominator together and largely cancels in the share.
+# But that is an expectation, and neither existing category can test it: M
+# sweeps sigma_trend at true_trend = 0, where naive bias is ~0 and the share is
+# unidentified, while Q varies the mean trends at sigma_trend fixed to 0.02.
+#
+# So: hold a divergent MEAN trend fixed and sweep tau_beta. With did_trend = 0
+# the naive bias is W_naive * pp_trend / baseline, so the measured bias traces
+# W_naive(tau_beta) up to a known constant. Flat confirms the closed form;
+# declining means the fitted naive model downweights its contaminated PP block
+# and the analytic surface overstates naive bias at large tau_beta.
+#
+# metadid rides along as the sharper test of the other half of the formula --
+# its bias SHOULD fall with tau_beta, via the identification discount.
+#
+# RESULT (40 reps): naive bias falls 5.7% (se 1.9%, p = 0.02) across the sweep,
+# so the closed form's exact invariance is wrong but only mildly. The mechanism
+# is confirmed -- inflating BOTH blocks by tau_beta^2 (one common fitted tau)
+# predicts -4.9%; inflating PP alone predicts -77%. Separately, measured bias
+# is below prediction in both arms (naive 0.89x, metadid 0.73x), which is not
+# yet explained; see `.q_weights` in R/plots.R.
+# ---------------------------------------------------------------------------
+W_TAU_BETA <- c(0.01, 0.02, 0.04, 0.06, 0.09)
+W_PP_TREND <- 0.12   # matches the outer edge of the Q grid
+
+for (.i in seq_along(W_TAU_BETA)) {
+  .tb <- W_TAU_BETA[.i]
+  SCENARIO_CONFIGS[[paste0("W", .i)]] <- scenario(
+    sprintf("SI heterogeneity check: PP trend %s, sigma_trend %s",
+            W_PP_TREND, .tb),
+    dgp = list(
+      type       = "bespoke",
+      bespoke_fn = "simulate_divergent_trends",
+      n_did = 5L, n_pp = 5L,
+      did_trend = 0, pp_trend = W_PP_TREND,
+      sigma_trend = .tb
+    ),
+    compare = list(
+      list(label = "full",  fn = "meta_did"),
+      list(label = "naive", fn = "meta_did_general",
+           time_trend = "fixed_zero", baseline_imbalance = "fixed_zero")
+    )
+  )
+}
+rm(.i, .tb)
+
+# ---------------------------------------------------------------------------
 # Category U: what each incomplete design is worth (figure panel E)
 #
 # Per-study sampling variance of the theta contribution, with n per arm,

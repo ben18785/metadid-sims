@@ -1382,6 +1382,24 @@ plot_figure_si_tolerance <- function(all_agg,
 #' the borrowed trend, so their information is discounted first (equation 6.4
 #' of docs/design-information-derivation.docx).
 #'
+#' VALIDATED against scenario category W (40 reps, 5 DiD + 5 PP, did_trend = 0,
+#' pp_trend = 0.12, sweeping tau_beta). Two departures, both conservative:
+#'
+#'   * the formula OVERSTATES bias in both arms -- measured/predicted is 0.89
+#'     for naive and 0.73 for metadid. Since metadid is overstated by more, the
+#'     region map draws its diagonal band too NARROW: the true "metadid better"
+#'     region is larger than plotted. Cause not yet identified.
+#'   * naive is treated as exactly independent of tau_beta, but measured naive
+#'     bias falls 5.7% (se 1.9%, p = 0.02) across tau_beta 0.01 -> 0.09. The
+#'     mechanism is that the naive model fits ONE common tau across both blocks,
+#'     so trend variance inflates the DiD and PP variances together and nearly
+#'     cancels in the share; adding tau_beta^2 to both blocks predicts -4.9%
+#'     against the measured -5.7%. Modelling it as inflating PP only predicts
+#'     -77%, which is badly wrong -- the sharing is the whole story.
+#'
+#' Both are small next to the 15% the naive band already varies across tau_theta,
+#' so the map is kept as-is and the caveat stated rather than the formula patched.
+#'
 #' @param dgp A scenario dgp list.
 #' @return List with `naive` and `metadid` weight shares.
 .q_weights <- function(dgp) {
@@ -1555,6 +1573,12 @@ plot_figure_si_composition <- function(n_did = c(5, 10, 20),
 #' zero -- the model degrades gracefully to a DiD-only analysis rather than
 #' propagating a trend it cannot identify. The map shows bias only, so the
 #' precision given up in reaching that limit is figure 1F.
+#'
+#' CAVEAT for the caption: the orange naive band has exactly constant height
+#' down every column because tau_beta does not enter the naive weight share in
+#' `.q_weights`. Category W measures a real but small dependence (-5.7% over
+#' this tau_beta range) that the closed form omits -- see `.q_weights` for the
+#' mechanism and for the level offsets in both arms.
 #'
 #' @param tau_theta,tau_beta Heterogeneity SDs to cross.
 #' @param n_did,n_pp Evidence base held fixed across the sweep.
