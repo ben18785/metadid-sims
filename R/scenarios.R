@@ -1764,13 +1764,17 @@ rm(.i, .nd, .np)
 # ---------------------------------------------------------------------------
 # Category W: does the naive weight share depend on trend heterogeneity?
 #
-# The analytic bias surface (.q_weights in R/plots.R) gives the naive model an
+# KEEP THIS CATEGORY. It is the check that retired the analytic trend-plane
+# figures, and it is the only thing in the repo that tests the closed-form
+# weight shares of docs/design-information-derivation against simulation.
+#
+# The closed form (section 6 of that document) gives the naive model an
 # inverse-variance weight share built from 1 / (tau_theta^2 + s^2). tau_beta
-# never enters it, so the supplementary heterogeneity map has a naive band of
-# EXACTLY constant height down every column. That is an assumption, not a
-# result: the naive model sees PP "effects" of theta_i + beta_i, whose between-
-# study variance is tau_theta^2 + tau_beta^2, and it estimates its heterogeneity
-# from the data rather than being told the true tau_theta.
+# never enters it, so an analytic heterogeneity map has a naive band of EXACTLY
+# constant height down every column. That is an assumption, not a result: the
+# naive model sees PP "effects" of theta_i + beta_i, whose between-study
+# variance is tau_theta^2 + tau_beta^2, and it estimates its heterogeneity from
+# the data rather than being told the true tau_theta.
 #
 # The expectation is that the error is small, because the naive model fits ONE
 # common tau across both blocks (it cannot tell PP from DiD), so the inflation
@@ -1788,12 +1792,40 @@ rm(.i, .nd, .np)
 # metadid rides along as the sharper test of the other half of the formula --
 # its bias SHOULD fall with tau_beta, via the identification discount.
 #
-# RESULT (40 reps): naive bias falls 5.7% (se 1.9%, p = 0.02) across the sweep,
-# so the closed form's exact invariance is wrong but only mildly. The mechanism
-# is confirmed -- inflating BOTH blocks by tau_beta^2 (one common fitted tau)
-# predicts -4.9%; inflating PP alone predicts -77%. Separately, measured bias
-# is below prediction in both arms (naive 0.89x, metadid 0.73x), which is not
-# yet explained; see `.q_weights` in R/plots.R.
+# RESULT (40 reps, seeds 9001-9040). Two findings, the second decisive.
+#
+# 1. The tau_beta question, answered. Naive bias falls 5.7% (se 1.9%, p = 0.02)
+#    across the sweep, so the closed form's exact invariance is wrong but only
+#    mildly. The mechanism is confirmed: inflating BOTH blocks by tau_beta^2
+#    (one common fitted tau) predicts -4.9%; inflating PP alone predicts -77%,
+#    so the sharing is the whole story.
+#
+# 2. The closed form does not reproduce the weight shares at all. Measured bias
+#    is below prediction in both arms -- naive 0.89x, metadid 0.73x -- and the
+#    RATIO W_naive/W_metadid, which is what sets the relative widths of the
+#    trusted regions, is out by ~28% (1.24 predicted, 1.59 measured).
+#
+#    This cannot be rescaled away. Inverting the measured bias gives an actual
+#    naive weight share of 0.474 -- BELOW 0.5. With equal study counts and
+#    s2D = 2 * s2P the PP block has LESS sampling variance, so any common-tau
+#    inverse-variance weighting puts W_naive strictly ABOVE 0.5, approaching
+#    0.5 from above as tau grows. No choice of tau, sigma or rho, and no raw-
+#    versus-normalised scale factor, reaches 0.474. Something in the fitted
+#    model downweights the PP block below parity that the derivation does not
+#    represent. Robust heterogeneity is ruled out (these scenarios run
+#    robust_heterogeneity = FALSE). Untested candidates: per-study baseline
+#    normalisation, or the estimated baseline imbalance.
+#
+#    Consequence: the analytic trend-plane figures were dropped and figure 2 is
+#    the simulated Q grid. What survives is the GEOMETRY -- metadid unbiased on
+#    the diagonal, naive on the horizontal, both confirmed here, and metadid's
+#    weight share genuinely collapsing with tau_beta (0.387 -> 0.091). It is the
+#    band WIDTHS the closed form gets wrong.
+#
+#    Measured weight shares (did_trend = 0, pp_trend = 0.12, 5 DiD + 5 PP):
+#      tau_beta   0.01   0.02   0.04   0.06   0.09
+#      W_naive   0.484  0.483  0.471  0.474  0.457
+#      W_metadid 0.387  0.304  0.190  0.139  0.091
 # ---------------------------------------------------------------------------
 W_TAU_BETA <- c(0.01, 0.02, 0.04, 0.06, 0.09)
 W_PP_TREND <- 0.12   # matches the outer edge of the Q grid

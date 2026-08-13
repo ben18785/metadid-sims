@@ -94,10 +94,41 @@ fit_scenario <- function(sim_result, fit_config) {
     meta_did_general = metadid::meta_did_general,
     stop("Unknown fit function: ", fit_config$fn)
   )
-  fit <- do.call(fit_fn, args)
 
-  # Extract posterior summaries
-  extract_posteriors(fit)
+  # A few percent of fits die reading their own CmdStan output -- "File does
+  # not exist: .../meta_analysis_master-<stamp>-<chain>-<hash>.csv", or a
+  # truncated CSV surfacing as "length of 'dimnames' [2] not equal to array
+  # extent". Measured at 16/400 (4%) locally, running SERIALLY on an idle
+  # machine, so it is not contention between crew workers. In CI a single such
+  # branch kills the whole multi-hour job.
+  #
+  # The retry deliberately re-runs with IDENTICAL arguments, including the
+  # seed. That matters for the statistics: a successful retry is the same
+  # posterior draw the first attempt was computing, so nothing is selected on.
+  # Retrying with a fresh seed would instead condition on success and could
+  # quietly bias results toward well-behaved datasets. A failure that is really
+  # about the data or the model reproduces under the same seed and still
+  # surfaces, which is what we want.
+  .attempt <- function(k) {
+    fit <- do.call(fit_fn, args)
+    extract_posteriors(fit)
+  }
+  # 5, not 3. The camera-ready run is ~6,280 fits (157 per rep x 40 reps), so
+  # at a 4% per-fit flake rate P(some fit exhausts its attempts, killing the
+  # job) is 1.00 at 2 attempts, 0.33 at 3, 0.016 at 4 and 0.001 at 5. Retries
+  # only fire on the 4%, so the expected extra compute is ~4%.
+  n_try <- as.integer(Sys.getenv("FIT_MAX_ATTEMPTS", "5"))
+  for (k in seq_len(n_try)) {
+    out <- try(.attempt(k), silent = TRUE)
+    if (!inherits(out, "try-error")) return(out)
+    msg <- conditionMessage(attr(out, "condition"))
+    if (k == n_try) {
+      stop(sprintf("fit failed after %d attempts with identical inputs: %s",
+                   n_try, msg), call. = FALSE)
+    }
+    message(sprintf("fit attempt %d/%d failed (%s); retrying with the same seed",
+                    k, n_try, msg))
+  }
 }
 
 # ===========================================================================
