@@ -672,7 +672,7 @@ paper_panels <- function(all_agg, paired = NULL, q_tol_frac = Q_TOL_FRAC) {
     ggplot2::labs(title = "D  Variable trends, zero mean: RMSE ratio (M)",
                   x = expression(tau[beta] * " (multiples of default), " *
                                    mu[beta] * " = 0"),
-                  y = "RMSE of metadid / naive") +
+                  y = "Ratio of RMSE, metadid / naive") +
     .fig_theme()
 
   # --- J: DiD studies needed to buy back the premium (R) ------------------
@@ -715,10 +715,20 @@ paper_panels <- function(all_agg, paired = NULL, q_tol_frac = Q_TOL_FRAC) {
                                  name = "PP studies") +
     ggplot2::labs(title = "F  Pure null: interval premium (R)",
                   x = "DiD studies",
-                  y = "90% CrI width, metadid / naive") +
+                  y = "Ratio of 90% CrI width, metadid / naive") +
     .fig_theme() +
-    # .fig_theme() blanks legend titles; without it these read as bare numbers
-    ggplot2::theme(legend.title = ggplot2::element_text(size = 8))
+    # .fig_theme() blanks legend titles; without it these read as bare numbers.
+    # Placed inside the panel: the curves decay to the right, so the top-right
+    # corner is empty.
+    ggplot2::theme(legend.title = ggplot2::element_text(size = 8),
+                   legend.position = "inside",
+                   legend.position.inside = c(0.99, 0.99),
+                   legend.justification = c(1, 1),
+                   legend.background = ggplot2::element_rect(
+                     fill = grDevices::adjustcolor("white", alpha.f = 0.75),
+                     colour = NA),
+                   legend.key.size = ggplot2::unit(0.8, "lines"),
+                   legend.text = ggplot2::element_text(size = 7))
 
   # --- K/L: bias over the trend plane (Q) ---------------------------------
   # Each model is unbiased only on its own line: the full model along the
@@ -907,6 +917,14 @@ illustration_panels <- function(draws) {
           mixed_naive    = sprintf("naive: %d DiD + %d PP", h, h),
           did_all_full   = sprintf("all %d DiD (oracle)", n))
   lab <- nm
+  # Direct labels sit next to the curve, so they must be short; the full
+  # composition belongs in the caption rather than on the plot.
+  short <- c(did_half_full  = sprintf("%d DiD", h),
+             pp_half_naive  = sprintf("%d PP (naive)", h),
+             mixed_full     = "metadid",
+             mixed_naive    = "naive",
+             did_all_full   = sprintf("oracle: %d DiD", n))
+  short <- stats::setNames(unname(short), unname(nm))
   cols <- setNames(c("#5b6770", "#D55E00", "#0072B2", "#D55E00", "#1a1a1a"),
                    unname(nm))
   d <- draws |> dplyr::mutate(model = unname(lab[model]))
@@ -919,25 +937,38 @@ illustration_panels <- function(draws) {
   mk <- function(models, ttl, legend_rows = 1L) {
     dd <- d |> dplyr::filter(model %in% unname(lab[models])) |>
       dplyr::mutate(model = factor(model, levels = unname(lab[models])))
+    # Label each density at its own peak instead of carrying a legend. ggrepel
+    # nudges them apart where the densities overlap (metadid vs the oracle in
+    # the pooled panel sit almost on top of each other).
+    peaks <- dd |>
+      dplyr::group_by(model) |>
+      dplyr::summarise(
+        x = { k <- stats::density(draw, adjust = 1.2); k$x[which.max(k$y)] },
+        y = { k <- stats::density(draw, adjust = 1.2); max(k$y) },
+        .groups = "drop")
     ggplot2::ggplot(dd, ggplot2::aes(draw, colour = model, fill = model)) +
       ggplot2::geom_density(alpha = 0.25, adjust = 1.2, linewidth = 0.6) +
       ggplot2::geom_vline(xintercept = truth, linetype = "dashed",
                           colour = "#1a1a1a") +
-      ggplot2::scale_colour_manual(values = cols) +
-      ggplot2::scale_fill_manual(values = cols) +
+      ggrepel::geom_text_repel(
+        data = peaks,
+        ggplot2::aes(x, y, label = short[as.character(model)], colour = model),
+        inherit.aes = FALSE, size = 2.7, seed = 1L, direction = "y",
+        nudge_y = 0.1 * max(peaks$y), min.segment.length = 0.5,
+        segment.colour = "#b0b0b0", segment.size = 0.25,
+        box.padding = 0.3, point.padding = 0.2, show.legend = FALSE) +
+      ggplot2::scale_colour_manual(values = cols, guide = "none") +
+      ggplot2::scale_fill_manual(values = cols, guide = "none") +
       ggplot2::coord_cartesian(xlim = xr) +
-      # Three long series labels overflow a single row at panel width.
-      ggplot2::guides(
-        colour = ggplot2::guide_legend(nrow = legend_rows),
-        fill   = ggplot2::guide_legend(nrow = legend_rows)) +
+      # headroom so the topmost label is not clipped
+      ggplot2::scale_y_continuous(expand = ggplot2::expansion(mult = c(0.02, 0.30))) +
       ggplot2::labs(title = ttl,
                     x = expression("Population treatment effect " *
                                      mu[theta] * " (normalised)"),
                     y = NULL) +
       .fig_theme() +
       ggplot2::theme(axis.text.y = ggplot2::element_blank(),
-                     axis.ticks.y = ggplot2::element_blank(),
-                     legend.text = ggplot2::element_text(size = 7.5))
+                     axis.ticks.y = ggplot2::element_blank())
   }
   list(
     split  = mk(c("did_half_full", "pp_half_naive"),
@@ -966,9 +997,9 @@ plot_figure1 <- function(all_agg, illustration, paired = NULL,
   p  <- paper_panels(all_agg, paired, q_tol_frac)
   il <- illustration_panels(illustration)
   patchwork::wrap_plots(
-    .retitle(il$split,  "A  Analysed separately, the designs disagree"),
-    .retitle(p$E, "B  Incomplete designs help most with few DiD\n     studies or high effect heterogeneity"),
-    .retitle(p$F, "C  With no time trends, metadid costs little"),
+    .retitle(il$split,  "A  With a time trend, DiD and pre-post\n     studies give different results"),
+    .retitle(p$E, "B  Adding other designs helps most with few\n     DiD studies or heterogeneous effects"),
+    .retitle(p$F, "C  Modelling a trend, metadid matches the\n     no-trend CI given enough DiD studies"),
     .retitle(il$pooled, "D  Pooling with metadid estimates the effect\n     more precisely"),
     .retitle(p$U, "E  Post-only RCTs are most informative when\n     pre-post correlation is low"),
     .retitle(p$D, "F  With zero-mean variable trends, metadid\n     improves on naive quickly"),
