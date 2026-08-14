@@ -373,6 +373,48 @@ Q_TOL_FRAC <- 0.15
   all(c("full", "naive") %in% names(df)) && nrow(df) > 0
 }
 
+# Vertical "which way is good" arrow, drawn in a strip of empty space at the
+# right of a panel. Ratio panels are the ones that need it: "ratio of RMSE,
+# metadid / naive" is only readable once you have worked out which direction
+# favours which model, and that is exactly the work a reader skips.
+#
+# Drawn INSIDE the panel, with the room made by expanding the x scale rather
+# than by writing outside the plotting region. patchwork aligns panels on their
+# plotting regions, so anything drawn beyond one would shift that column
+# relative to its neighbours.
+#
+# `at` positions the label along the arrow; the midpoint is wrong on a log
+# scale, where the visual centre is the geometric mean.
+# Vertical curly brace grouping a set of lines, drawn as a path. `depth` is
+# signed: positive opens the tip to the right, negative to the left. Built from
+# two mirrored smoothsteps meeting at the tip, which reads as a brace without
+# needing a bracket package (and so without a new dependency).
+.brace <- function(x, y0, y1, depth, colour = "#4d4d4d", n = 40,
+                   log_y = FALSE) {
+  ys <- if (log_y) {
+    exp(seq(log(y0), log(y1), length.out = 2 * n))
+  } else {
+    seq(y0, y1, length.out = 2 * n)
+  }
+  s <- seq(0, 1, length.out = n)
+  step <- 0.5 * (1 - cos(pi * s))          # 0 -> 1, flat at both ends
+  xs <- x + depth * c(step, rev(step))
+  ggplot2::annotate("path", x = xs, y = ys, colour = colour, linewidth = 0.35)
+}
+
+.dir_arrow <- function(x, from, to, label, at = NULL, colour = "#4d4d4d",
+                       size = 3) {
+  if (is.null(at)) at <- (from + to) / 2
+  list(
+    ggplot2::annotate("segment", x = x, xend = x, y = from, yend = to,
+                      colour = colour, linewidth = 0.4,
+                      arrow = grid::arrow(length = grid::unit(0.06, "in"),
+                                          type = "closed")),
+    ggplot2::annotate("text", x = x, y = at, label = label, angle = 90,
+                      vjust = -0.55, size = size, colour = colour)
+  )
+}
+
 .fig_bias_fill <- function(limit) {
   ggplot2::scale_fill_gradient2(
     low = "#2166AC", mid = "#F7F7F7", high = "#B2182B", midpoint = 0,
@@ -627,38 +669,81 @@ paper_panels <- function(all_agg, paired = NULL, q_tol_frac = Q_TOL_FRAC) {
     bquote(tau[theta] == .(v_se) ~ "," ~ .(V_CORE) ~ "DiD core"),
     bquote(tau[theta] == .(s_se) ~ "," ~ .(S_CORE) ~ "DiD core")
   )
-  # six series (3 settings x 2 curves) land on the same x values, so a small
-  # dodge stops them stacking -- most visibly at x = 0 where the two low-tau
-  # settings and the reference all coincide
-  .pdodge <- ggplot2::position_dodge(width = 6)
-  gD <- ggplot2::ggplot(pd, ggplot2::aes(added, mean_posterior_sd,
-                                         colour = setting, linetype = curve)) +
-    ggplot2::geom_line(linewidth = 0.5, position = .pdodge) +
-    # +/- 1.96 MC standard errors of the mean across replicates.
-    ggplot2::geom_pointrange(
-      ggplot2::aes(ymin = mean_posterior_sd - 1.96 * se_posterior_sd,
-                   ymax = mean_posterior_sd + 1.96 * se_posterior_sd),
-      size = 0.35, linewidth = 0.4, na.rm = TRUE, position = .pdodge) +
+  # Facetted, and on a REDUCTION scale rather than the posterior SD itself.
+  # Six series on one pair of axes interleaved badly -- blue's dashed curve ran
+  # between the two green curves -- so no key could point at a pair without
+  # crossing another. One small panel per setting removes the overlap entirely,
+  # and normalising each to its own core makes the three directly comparable
+  # despite starting from very different absolute SDs.
+  #
+  # NOTE the framing choice: in percentage points the two low-tau settings are
+  # near-identical (17.0 vs 18.3 at 80 added), so this panel says the ANCHOR
+  # SIZE barely matters and tau_theta does. Plotting the ratio instead would
+  # separate them (2.2x vs 1.5x) and say the opposite. Same numbers, different
+  # question -- the reduction scale is the one that supports the panel title.
+  core0 <- pd |>
+    dplyr::filter(added == 0) |>
+    dplyr::group_by(setting) |>
+    dplyr::summarise(m0 = mean(mean_posterior_sd),
+                     se0 = mean(se_posterior_sd), .groups = "drop")
+  pdr <- pd |>
+    dplyr::group_by(setting, added, curve) |>
+    dplyr::summarise(m = mean(mean_posterior_sd), se = mean(se_posterior_sd),
+                     .groups = "drop") |>
+    dplyr::left_join(core0, by = "setting") |>
+    dplyr::mutate(
+      red = 100 * (1 - m / m0),
+      # delta method on m / m0. At added = 0 the two are the SAME quantity, so
+      # the reduction is 0 by construction and an interval there is fabricated.
+      sred = ifelse(added == 0, NA_real_,
+                    100 * (m / m0) * sqrt((se / m)^2 + (se0 / m0)^2)))
+  .flev <- vapply(pd_labs, function(b) paste(deparse(b), collapse = ""),
+                  character(1))
+  pdr$facet <- factor(.flev[as.integer(pdr$setting)], levels = .flev)
+  # Direct labels on the curves rather than a key in the corner. Both live in
+  # the LEFT facet, where the two curves are furthest apart (85.7 vs 68.7 at 80
+  # added); the linetype meaning is shared, so labelling it once serves all
+  # three. Each is approached from its own side -- the dashed curve from above,
+  # the solid from below -- because a leader reaching the upper curve from
+  # underneath would have to cross the lower one.
+  key <- tibble::tibble(
+    facet = factor(.flev[1], levels = .flev),
+    # "RCT + PP added" goes in the empty lower-RIGHT quadrant, not the lower
+    # left: the solid curve climbs almost vertically over x = 0..10, so a
+    # left-anchored label at any height below ~60% is crossed by its own curve.
+    x    = c(34, 79),   # text anchor, right-aligned
+    y    = c(97, 52),
+    xs   = c(36, 73), ys = c(95, 55.5),  # leader start
+    xe   = c(46, 68), ye = c(83, 66.5),  # leader end, just off the curve
+    lab  = c("DiD added", "RCT + PP added"))
+  gD <- ggplot2::ggplot(pdr, ggplot2::aes(added, red, colour = setting,
+                                          linetype = curve)) +
+    ggplot2::geom_line(linewidth = 0.5) +
+    ggplot2::geom_pointrange(ggplot2::aes(ymin = red - 1.96 * sred,
+                                          ymax = red + 1.96 * sred),
+                             size = 0.3, linewidth = 0.35, na.rm = TRUE) +
     ggplot2::scale_colour_manual(
-      values = c(k = "#0072B2", v = "#009E73", s = "#D55E00"),
-      labels = pd_labs, name = NULL) +
+      values = c(k = "#0072B2", v = "#009E73", s = "#D55E00"), guide = "none") +
     ggplot2::scale_linetype_manual(
       values = c("RCT + PP" = "solid", "DiD (reference)" = "dashed"),
-      labels = c("RCT + PP" = "RCT + PP added",
-                 "DiD (reference)" = "DiD added"),
-      name = NULL) +
-    # log scale: the three settings span roughly an 8-fold range of posterior
-    # SD, so on a linear axis the low-tau curves compress into the floor and
-    # overlap. On a log axis the mixed-vs-reference GAP -- which is the point
-    # of the panel -- is a constant visual distance at every level.
-    ggplot2::scale_y_log10() +
-    ggplot2::guides(colour = ggplot2::guide_legend(nrow = 2, order = 1),
-                    linetype = ggplot2::guide_legend(nrow = 2, order = 2)) +
+      guide = "none") +
+    ggplot2::geom_segment(data = key,
+                          ggplot2::aes(x = xs, xend = xe, y = ys, yend = ye),
+                          inherit.aes = FALSE, colour = "#8c8c8c",
+                          linewidth = 0.3) +
+    ggplot2::geom_text(data = key, ggplot2::aes(x = x, y = y, label = lab),
+                       inherit.aes = FALSE, hjust = 1, size = 2.7,
+                       colour = "#4d4d4d") +
+    ggplot2::scale_x_continuous(breaks = c(0, 20, 40, 60, 80)) +
+    # headroom for the upper label, and 100% is the natural bound anyway
+    ggplot2::expand_limits(y = 100) +
+    ggplot2::scale_y_continuous(labels = function(v) paste0(v, "%")) +
+    ggplot2::facet_wrap(~ facet, labeller = ggplot2::label_parsed) +
     ggplot2::labs(title = "B  Marginal value of incomplete designs (K, V, S)",
                   x = "Studies added to the DiD core",
-                  y = expression("Posterior SD of " * mu[theta])) +
+                  y = expression("Reduction in posterior SD of " * mu[theta])) +
     .fig_theme() +
-    ggplot2::theme(legend.text = ggplot2::element_text(size = 7.5))
+    ggplot2::theme(strip.text = ggplot2::element_text(size = 8))
 
   # --- I: efficiency over the trend-variability sweep (M) -----------------
   # Same sweep as panel C, on RMSE. mu_beta = 0 throughout, so no arm is
@@ -702,9 +787,18 @@ paper_panels <- function(all_agg, paired = NULL, q_tol_frac = Q_TOL_FRAC) {
                              colour = "#0072B2", size = 0.35, linewidth = 0.4,
                              na.rm = TRUE) +
     ggplot2::labs(title = "D  Variable trends, zero mean: RMSE ratio (M)",
-                  x = expression(tau[beta] * " (multiples of default), " *
-                                   mu[beta] * " = 0"),
+                  # plotmath, so the Greek renders on the pdf device too -- a
+                  # literal tau in a plain string is dropped there (mbcsToSbcs)
+                  x = expression("Time trend SD " * tau[beta] * " (mean zero)"),
                   y = "Ratio of RMSE, metadid / naive") +
+    # room on the right for the direction arrows, then the arrows themselves.
+    # Ratio = metadid / naive RMSE, so above 1 the naive model has the smaller
+    # error and below 1 metadid does.
+    ggplot2::scale_x_continuous(
+      breaks = c(0, 2, 4, 6),
+      expand = ggplot2::expansion(mult = c(0.05, 0.03))) +
+    .dir_arrow(x = 7.9, from = 1.03, to = 1.24, label = "naive better") +
+    .dir_arrow(x = 7.9, from = 0.97, to = 0.42, label = "metadid better") +
     .fig_theme()
 
   # --- J: DiD studies needed to buy back the premium (R) ------------------
@@ -744,23 +838,42 @@ paper_panels <- function(all_agg, paired = NULL, q_tol_frac = Q_TOL_FRAC) {
                              linewidth = 0.4, na.rm = TRUE) +
     # ordered quantity -> sequential ramp, not categorical hues
     ggplot2::scale_colour_manual(values = c("#9ECAE1", "#4292C6", "#08519C"),
-                                 name = "PP studies") +
+                                 name = "PP studies", guide = "none") +
     ggplot2::labs(title = "F  Pure null: interval premium (R)",
                   x = "DiD studies",
                   y = "Ratio of 90% CrI width, metadid / naive") +
-    .fig_theme() +
-    # .fig_theme() blanks legend titles; without it these read as bare numbers.
-    # Placed inside the panel: the curves decay to the right, so the top-right
-    # corner is empty.
-    ggplot2::theme(legend.title = ggplot2::element_text(size = 8),
-                   legend.position = "inside",
-                   legend.position.inside = c(0.99, 0.99),
-                   legend.justification = c(1, 1),
-                   legend.background = ggplot2::element_rect(
-                     fill = grDevices::adjustcolor("white", alpha.f = 0.75),
-                     colour = NA),
-                   legend.key.size = ggplot2::unit(0.8, "lines"),
-                   legend.text = ggplot2::element_text(size = 7))
+    # Deliberately NOT the two-headed "naive better / metadid better" pair used
+    # on the RMSE panel. This is the pure null: there is no trend at all, so the
+    # naive model is correctly specified and beats metadid EVERYWHERE by
+    # construction -- the whole panel sits above 1. Labelling the upper region
+    # "naive better" would dress a tautology up as a finding, and the lower
+    # region never occurs. What the panel actually shows is the premium
+    # shrinking, so that is what the arrow says.
+    # breaks stop at the data: the expansion is margin for the arrow, not range
+    ggplot2::scale_x_continuous(
+      breaks = c(0, 10, 20, 30),
+      # additive on the left: the margin has to fit the right-aligned "50 PP"
+      # labels, which is a text width, not a fraction of the x range
+      expand = ggplot2::expansion(mult = c(0, 0.02), add = c(6.2, 0))) +
+    # Two lines: rotated text stacks across the arrow rather than along it, so
+    # wrapping buys width the panel has and the arrow's length does not.
+    .dir_arrow(x = 33.5, from = 2.0, to = 1.04,
+               label = "uncertainty same\nas naive model") +
+    # Direct labels instead of a legend. Placed at the LEFT end, where the
+    # three curves are 2.72 / 1.92 / 1.22 and comfortably apart; at the right
+    # end they have converged to within 0.07 of each other and no set of labels
+    # would separate. Text sits at the x = 2 height while the curves fall away
+    # to the right, so it clears them without a leader.
+    # Right-aligned in the empty margin LEFT of the first x value, not beside
+    # the points: to the right the curves fall steeply across each other, and
+    # the 50 PP curve passes straight through wherever the 20 PP label sits.
+    # Nothing is drawn left of x = 2, so no offset or leader is needed.
+    ggplot2::annotate("text", x = 1.45,
+                      y = c(2.722, 1.919, 1.218),
+                      label = paste(rev(levels(pj$n_pp)), "PP"),
+                      colour = c("#08519C", "#4292C6", "#9ECAE1"),
+                      hjust = 1, size = 3) +
+    .fig_theme()
 
   # --- K/L: bias over the trend plane (Q) ---------------------------------
   # Each model is unbiased only on its own line: the full model along the
@@ -843,9 +956,12 @@ paper_panels <- function(all_agg, paired = NULL, q_tol_frac = Q_TOL_FRAC) {
   # the supplement are THEORY ONLY -- closed-form curves from equations (5.2)
   # and (6.5) of docs/design-information-derivation.docx. Set show_measured to
   # overlay the simulated points; nothing does at present.
+  # arrows default off when facetted: the supplementary version splits this
+  # panel in two, leaving no room for a right-hand margin in either facet
   .exchange_panel <- function(designs, ttl, facet = FALSE,
                               show_measured = FALSE,
-                              nuisance = "borrowed quantity") {
+                              nuisance = "borrowed quantity",
+                              arrows = !facet) {
     lab_anchor <- function(x) paste(x, "DiD")
     th <- dplyr::filter(u_th, design %in% designs) |>
       dplyr::mutate(anchor = factor(lab_anchor(anchor)))
@@ -877,19 +993,67 @@ paper_panels <- function(all_agg, paired = NULL, q_tol_frac = Q_TOL_FRAC) {
     g <- g +
       ggplot2::geom_text(data = ends,
                          ggplot2::aes(label = anchor, colour = anchor),
-                         hjust = -0.15, size = 2.7, show.legend = FALSE) +
+                         hjust = -0.15, size = 3, show.legend = FALSE) +
       ggplot2::scale_colour_manual(values = c("#9ECAE1", "#08519C"),
                                    guide = "none") +
       ggplot2::scale_linetype_manual(
         values = stats::setNames(c("dotdash", "solid"), .lt),
-        breaks = .lt, name = NULL) +
-      ggplot2::scale_x_continuous(expand = ggplot2::expansion(mult = c(0.02, 0.14))) +
+        breaks = .lt, name = NULL,
+        # the main panel annotates this in place; the facetted supplementary
+        # has no room for that and keeps the legend
+        guide = if (arrows) "none" else "legend") +
+      # right margin holds the in-place anchor labels; widened further below
+      # when the direction arrows are drawn as well
+      # breaks stop at 0.75: rho is a correlation, so expansion past 1.0 must
+      # not be labelled as if the axis continued
+      # additive on the arrow side: the margin has to clear the in-place anchor
+      # labels by a fixed amount in rho units, which a multiplier only
+      # approximates. breaks stop at 0.75 -- rho is a correlation, so the
+      # margin must not be labelled as if the axis continued past 1.
+      ggplot2::scale_x_continuous(
+        breaks = seq(0.25, 0.75, 0.25),
+        expand = if (arrows) ggplot2::expansion(mult = 0, add = c(0.155, 0.05))
+                 else ggplot2::expansion(mult = c(0.02, 0.14))) +
       ggplot2::scale_y_continuous(breaks = seq(0, 1.4, 0.2)) +
       ggplot2::expand_limits(y = 0) +
       ggplot2::labs(title = ttl,
                     x = expression("Pre-post correlation " * rho),
                     y = "Information per study, relative to DiD") +
       .fig_theme()
+    if (arrows) {
+      # 1.0 is parity with a single DiD study, and the dot-dash curve genuinely
+      # crosses it, so unlike the pure-null panel both regions are occupied and
+      # the symmetric pair is the honest annotation. Headroom is added above
+      # the data because the "worth more" side is otherwise only 0.2 tall.
+      # clear of the in-place anchor labels, which run right from the curve
+      # ends -- at +0.155 the arrow text ran straight through "20 DiD"
+      xa <- max(th$rho) + 0.265
+      x0 <- min(th$rho)
+      # the two realised curves share a linetype, so one brace covers both;
+      # drawn on the LEFT because the right margin already carries the anchor
+      # labels and the direction arrows
+      # th holds the realised (solid) curves; ce holds the ideal (dotdash) one
+      re <- dplyr::filter(th, rho == x0)
+      g <- g +
+        ggplot2::expand_limits(y = 1.32) +
+        .brace(x = x0 - 0.030, y0 = min(re$ratio), y1 = max(re$ratio),
+               depth = -0.022) +
+        ggplot2::annotate("text", x = x0 - 0.103,
+                          y = mean(range(re$ratio)), angle = 90,
+                          label = paste0(nuisance, "\nestimated"),
+                          size = 2.7, colour = "#4d4d4d") +
+        # the ideal curve is alone above the others, so it takes a leader
+        ggplot2::annotate("segment", x = 0.305, xend = 0.255,
+                          y = 1.248, yend = 1.132,
+                          colour = "#8c8c8c", linewidth = 0.3) +
+        ggplot2::annotate("text", x = 0.315, y = 1.262, hjust = 0,
+                          label = paste(nuisance, "assumed known"),
+                          size = 2.7, colour = "#4d4d4d") +
+        .dir_arrow(x = xa, from = 1.03, to = 1.30,
+                   label = "worth more\nthan a DiD", size = 2.7) +
+        .dir_arrow(x = xa, from = 0.97, to = 0.12,
+                   label = "worth less\nthan a DiD", size = 2.7)
+    }
     if (facet) g <- g + ggplot2::facet_wrap(~ design)
     g
   }
@@ -986,8 +1150,7 @@ illustration_panels <- function(draws) {
       # headroom so the topmost label is not clipped
       ggplot2::scale_y_continuous(expand = ggplot2::expansion(mult = c(0.02, 0.30))) +
       ggplot2::labs(title = ttl,
-                    x = expression("Population treatment effect " *
-                                     mu[theta] * " (normalised)"),
+                    x = expression("Population treatment effect " * mu[theta]),
                     y = NULL) +
       .fig_theme() +
       ggplot2::theme(axis.text.y = ggplot2::element_blank(),
@@ -1044,30 +1207,31 @@ plot_figure1 <- function(all_agg, illustration, paired = NULL,
                          q_tol_frac = Q_TOL_FRAC) {
   p  <- paper_panels(all_agg, paired, q_tol_frac)
   il <- illustration_panels(illustration)
-  # Panels carry no letter of their own: the COLUMN is the unit of argument,
-  # so the letter labels the column and the two panels beneath it are read
-  # together.
+  # Every panel carries its own letter, running DOWN each column (A/B, C/D,
+  # E/F) so that a column is still read as a unit. The column headers therefore
+  # drop the letters they used to carry -- two competing A/B/C schemes in one
+  # figure would be worse than either alone.
   cols <- list(
     A = list(.retitle(il$split,
-                      "With a time trend, DiD and pre-post\nstudies give different results"),
+                      "A  With a time trend, DiD and pre-post\nstudies give different results"),
              .retitle(il$pooled,
-                      "Pooling with metadid estimates the\neffect more precisely")),
+                      "B  Pooling with metadid estimates the\neffect more precisely")),
     B = list(.retitle(p$E,
-                      "Adding other designs helps most with\nfew DiD studies or heterogeneous effects"),
+                      "C  Adding other designs helps most with\nfew DiD studies or heterogeneous effects"),
              .retitle(p$U,
-                      "Post-only RCTs are most informative\nwhen pre-post correlation is low")),
+                      "D  Post-only RCTs are most informative\nwhen pre-post correlation is low")),
     C = list(.retitle(p$F,
-                      "Modelling a trend, metadid matches the\nno-trend CI given enough DiD studies"),
+                      "E  Modelling a trend, metadid matches the\nno-trend CI given enough DiD studies"),
              .retitle(p$D,
-                      "With zero-mean variable trends, metadid\nimproves on naive quickly"))
+                      "F  With zero-mean variable trends, metadid\nimproves on naive quickly"))
   )
   # One 3x3 grid (header row + two panel rows) rather than three independent
   # column patchworks: nesting by column lets each column size its own rows,
   # so panels stop lining up across the figure wherever a legend differs.
   hdr <- c(
-    A = "A   Pooling data across designs in the right way\n      leads to robust estimates",
-    B = "B   There is value from pooling other designs\n      with DiD studies",
-    C = "C   metadid performs reasonably even when there\n      are not strong time trends")
+    A = "Pooling data across designs in the right way\nleads to robust estimates",
+    B = "There is value from pooling other designs\nwith DiD studies",
+    C = "metadid performs reasonably even when there\nare not strong time trends")
   patchwork::wrap_plots(
     .col_header(hdr[["A"]]), .col_sep(FALSE),
     .col_header(hdr[["B"]]), .col_sep(FALSE),
