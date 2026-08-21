@@ -219,10 +219,17 @@ results_table <- function(agg_results, lookup, category, caption = NULL) {
              pooled     = "pooled trend",
              fixed_zero = "zero trend",
              fit$time_trend),
-      switch(fit$baseline_imbalance %||% "estimated",
-             estimated  = "estimated imbalance",
-             fixed_zero = "zero imbalance",
+      switch(fit$baseline_imbalance %||% "by_randomisation",
+             by_randomisation = "imbalance by randomisation",
+             estimated        = "pooled imbalance",
+             fixed_zero       = "zero imbalance",
              fit$baseline_imbalance),
+      # Only worth naming when it departs from the default; otherwise every
+      # label in every panel carries the same two tokens.
+      if (identical(fit$mu_gamma, "estimated")) "estimated imbalance mean" else NULL,
+      if (!is.null(fit$kappa) && !identical(fit$kappa, 0.5)) {
+        paste0("kappa = ", fit$kappa)
+      } else NULL,
       if (!isTRUE(fit$hierarchical_rho))      "fixed rho"        else NULL,
       if (fit$data_format == "individual")    "individual data"  else NULL
     )

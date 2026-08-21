@@ -309,6 +309,52 @@ plot_diagnostics(all_rep, all_agg, scenario_lookup_tbl, "I")
 results_table(all_agg, scenario_lookup_tbl, "I")
 ```
 
+## X. Randomisation and Baseline Imbalance
+
+The baseline difference $\gamma_i$ is the one nuisance parameter a post-only study cannot identify at all: its estimated effect is $\tilde\theta_i = \phi_i(1 + \tilde\beta_i) - \gamma_i$, so whatever the model assumes about imbalance subtracts directly from that study's treatment effect. These scenarios ask **whether imbalance learned from one kind of study should transport to another**.
+
+This is a different question from category P, which varies the *size* of imbalance among post-only studies that are all unrandomised. Category X varies *which studies are randomised*.
+
+Four fit arms recur throughout:
+
+| Arm | `baseline_imbalance` | `mu_gamma` | Meaning |
+|---|---|---|---|
+| `shared` | `estimated` | `estimated` | One $\gamma$ population with an estimated mean, applied to every study. metadid's default before this work. |
+| `zero_mean` | `estimated` | `zero` | One population, mean pinned at 0. Magnitude transports, direction does not. |
+| `two_pop` | `by_randomisation` | `zero` | Non-randomised studies pooled; randomised studies get $\mathcal N(0, \kappa^2 s_i^2)$. The current default. |
+| `fixed_zero` | `fixed_zero` | `zero` | $\gamma = 0$ for post-only studies (naive comparator). |
+
+What each block asks:
+
+- **X1–X3 (transport).** Unrandomised DiD studies whose treated arms all start high, alongside genuinely randomised trials. The `shared` arm should be biased by roughly the DiD imbalance, and that bias should *not* shrink as DiD evidence sharpens — it should sharpen with it.
+- **X4–X6 (direction).** Same imbalance magnitudes, sign flipped study by study. `shared` should now be roughly unbiased in the mean while $\tau_\gamma$ absorbs the full magnitude. This isolates whether $\mathcal N(0, \tau_\gamma)$ is the *right* amount of conservatism or merely a safe one.
+- **X7–X9 (mislabelling).** Prices the cost of the `randomisation` claim being wrong, and asks whether a larger $\kappa$ buys the robustness back.
+- **X10–X12 (hard-zero trap).** $\kappa = 0$ pins $\gamma$ at zero, so a real imbalance can no longer be differenced away. Compares against shrinking toward zero ($\kappa > 0$) and leaving $\gamma$ free.
+- **X13–X15 ($\kappa$ identification).** $\kappa$ is anchored only by randomised studies carrying pre-treatment data. X13 has none, so it sweeps fixed values instead — the spread across that sweep *is* the sensitivity band that justifies the default.
+- **X16–X18 (cluster randomisation).** The design effect is applied to the baseline contrast only; the post-period likelihood still uses $\sigma^2/n$, so residual over-precision is expected. Measuring its size is the point.
+- **X19 (aliasing).** For post-only studies only $\delta_{\mathrm{RCT}} + \mu_\gamma$ is identified.
+- **X20–X22 (normalisation).** $\gamma \equiv 0$ throughout, so $\tau_\gamma$ should concentrate at zero. Under normalisation the data are divided by the *observed* control baseline, which the likelihood then treats as exact — dropping that divisor's sampling variance from the baseline contrast. If it matters, $\tau_\gamma$ should sit above zero under normalisation and shrink with $n$. **$\tau_\gamma$ is exactly the quantity the two-population model transports to post-only studies, so this is a prerequisite for trusting the rest of X.**
+- **X24–X27 (pre-post scale mismatch).** A PP study has no control arm, so it normalises by its own treatment-arm pre mean while DiD and RCT normalise by the control baseline. When the treated group is selected those denominators differ by $(1 + \gamma/b)$, yet all designs pool into one $\mu_\theta$. $\gamma$ is swept with the PP share held at half, so X24 ($\gamma = 0$) is a built-in null, and the unnormalised arm is a second control — pooling on the absolute scale involves no divisor, so its slope across $\gamma$ should be flat. **Deliberately not registered in `scenario_expectations()`:** this is a real limitation rather than a naive comparator, so it belongs under "Genuine issues".
+- **X23 (individual data).** For summary studies $s_i$ is computed in R from reported SDs and passed as data; for individual studies the observation SDs are *parameters*, so $s_i$ is built inside Stan and its uncertainty propagated. Without this the branch ships untested.
+
+Arms marked misspecified-by-design in `scenario_expectations()` are expected to deviate — for X1–X3 in particular, the `shared` arm's bias *is* the result.
+
+```{r x-scenarios}
+scenario_summary_table("X") |>
+  kable(caption = "Category X: scenario definitions")
+```
+
+```{r x-diagnostics}
+#| fig-height: 8
+#| column: screen
+#| out-width: "100%"
+plot_diagnostics(all_rep, all_agg, scenario_lookup_tbl, "X")
+```
+
+```{r x-table}
+results_table(all_agg, scenario_lookup_tbl, "X")
+```
+
 ## Convergence Diagnostics
 
 ```{r convergence}

@@ -12,6 +12,7 @@
 #   targets::tar_make(names = starts_with("E_"))
 #   targets::tar_make(names = starts_with("H_"))
 #   targets::tar_make(names = starts_with("G_"))
+#   targets::tar_make(names = starts_with("X_"))
 #
 # Render the validation report:
 #   targets::tar_make(names = "report")
@@ -487,6 +488,29 @@ list(
   ),
   tar_target(P_agg, aggregate_scenario(P_rep)),
 
+  # ---- Category X: randomisation and baseline imbalance ----
+  # Split main/indiv as category A does: X23 uses individual-level data, whose
+  # per-subject likelihood makes it markedly slower, so it runs at the reduced
+  # replication count and is recombined under X_rep.
+  tarchetypes::tar_map_rep(
+    name    = X_rep_main,
+    command = run_one_rep(scenario_id, config, targets::tar_seed_get(), metadid_src),
+    values  = scenario_values(Filter(function(s) !scenario_is_individual(s), scenario_ids("X"))),
+    names   = tidyselect::any_of("scenario_id"),
+    batches = N_REPS_FIG,
+    reps    = 1
+  ),
+  tarchetypes::tar_map_rep(
+    name    = X_rep_indiv,
+    command = run_one_rep(scenario_id, config, targets::tar_seed_get(), metadid_src),
+    values  = scenario_values(Filter(scenario_is_individual, scenario_ids("X"))),
+    names   = tidyselect::any_of("scenario_id"),
+    batches = N_REPS_INDIV,
+    reps    = 1
+  ),
+  tar_target(X_rep, dplyr::bind_rows(X_rep_main, X_rep_indiv)),
+  tar_target(X_agg, aggregate_scenario(X_rep)),
+
   # ---- Category Q: trend-plane grid (panels K/L; reduced reps) ----
   tarchetypes::tar_map_rep(
     name    = Q_rep,
@@ -633,13 +657,15 @@ list(
     # exists and the report job would re-simulate all 52 of them serially on
     # one runner. They are built by figure.yaml instead.
     dplyr::bind_rows(A_agg, F_agg, B_agg, C_agg, D_agg, E_agg, G_agg, H_agg,
-                     I_agg, J_agg, K_agg, L_agg, M_agg, N_agg, O_agg, P_agg)
+                     I_agg, J_agg, K_agg, L_agg, M_agg, N_agg, O_agg, P_agg,
+                     X_agg)
   ),
 
   tar_target(
     all_rep,
     dplyr::bind_rows(A_rep, F_rep, B_rep, C_rep, D_rep, E_rep, G_rep, H_rep,
-                     I_rep, J_rep, K_rep, L_rep, M_rep, N_rep, O_rep, P_rep)
+                     I_rep, J_rep, K_rep, L_rep, M_rep, N_rep, O_rep, P_rep,
+                     X_rep)
   ),
 
   # ---- Machine-readable exports ----

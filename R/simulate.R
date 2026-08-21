@@ -234,6 +234,51 @@ build_true_params <- function(dgp, extra_true, normalised) {
     params$rho_effect_trend <- dgp$rho_effect_trend
   }
 
+  # --- Baseline-imbalance (gamma) truths -------------------------------------
+  # The model carries ONE non-randomised gamma population, so a truth exists
+  # only when the DiD and RCT non-randomised populations agree (or when one
+  # design contributes no non-randomised studies). When they differ -- the
+  # deliberate misspecification in the transport scenarios -- there is no true
+  # value to score against, so the columns are omitted and assess_one() skips
+  # them rather than scoring against a number we made up.
+  n_nonrand_did <- max(0L, dgp$n_did - dgp$n_randomised_did)
+  n_nonrand_rct <- max(0L, dgp$n_rct - dgp$n_randomised_rct)
+  pops <- list()
+  if (n_nonrand_did > 0) {
+    pops[[length(pops) + 1L]] <- c(dgp$did_gamma_mean, dgp$did_gamma_sd,
+                                   as.numeric(dgp$did_gamma_sign_flip))
+  }
+  if (n_nonrand_rct > 0) {
+    pops[[length(pops) + 1L]] <- c(dgp$rct_gamma_mean, dgp$rct_gamma_sd,
+                                   as.numeric(dgp$rct_gamma_sign_flip))
+  }
+  populations_agree <- length(pops) > 0 &&
+    all(vapply(pops, function(x) isTRUE(all.equal(x, pops[[1]])), logical(1)))
+
+  if (populations_agree) {
+    g_mean      <- pops[[1]][1]
+    g_sd        <- pops[[1]][2]
+    g_flip      <- pops[[1]][3] > 0
+    # A symmetric +/- mixture has mean 0 and variance gamma_mean^2 + gamma_sd^2:
+    # the magnitude survives, the direction does not.
+    true_g_mean <- if (g_flip) 0 else g_mean
+    true_g_sd   <- if (g_flip) sqrt(g_mean^2 + g_sd^2) else g_sd
+    params$baseline_difference_mean_raw <- true_g_mean
+    params$baseline_difference_sd_raw   <- true_g_sd
+    # gamma is a shift on the outcome scale, so it normalises exactly as the
+    # treatment effect does (delta method, same inv_b_factor).
+    params$baseline_difference_mean_normalised <- (true_g_mean / bm) * inv_b_factor
+    params$baseline_difference_sd_normalised   <-
+      sqrt(true_g_sd^2 + true_g_mean^2 * cv_b2) / bm
+  }
+
+  # kappa is dimensionless (a multiple of the study's own sampling SD), so it
+  # takes no _raw / _normalised suffix.
+  if (!is.null(dgp$kappa_true) &&
+      (dgp$n_randomised_did > 0 || dgp$n_randomised_rct > 0)) {
+    params$kappa <- dgp$kappa_true
+  }
+
   params
 }
 
@@ -683,6 +728,10 @@ simulate_rct_imbalance <- function(config) {
       tibble(
         study_id            = study_id,
         design              = "rct",
+        # gamma != 0 by construction: these are UNRANDOMISED post-only
+        # comparisons, not trials. Stated explicitly so the new
+        # baseline_imbalance = "by_randomisation" default reads them correctly.
+        randomisation       = "none",
         n_control           = dgp$n_control,
         n_treatment         = dgp$n_treatment,
         mean_post_control   = mean(ctrl_post),
@@ -732,6 +781,7 @@ simulate_did_rct_imbalance <- function(config) {
       tibble(
         study_id             = study_id,
         design               = "did",
+        randomisation        = "none",
         n_control            = dgp$n_control,
         n_treatment          = dgp$n_treatment,
         mean_pre_control     = mean(ctrl[, 1]),
@@ -763,6 +813,10 @@ simulate_did_rct_imbalance <- function(config) {
       tibble(
         study_id            = study_id,
         design              = "rct",
+        # gamma != 0 by construction: these are UNRANDOMISED post-only
+        # comparisons, not trials. Stated explicitly so the new
+        # baseline_imbalance = "by_randomisation" default reads them correctly.
+        randomisation       = "none",
         n_control           = dgp$n_control,
         n_treatment         = dgp$n_treatment,
         mean_post_control   = mean(ctrl_post),
@@ -1263,4 +1317,297 @@ simulate_multiplicative_levels <- function(config) {
 # for n_total studies and K levels (interleaved as evenly as possible).
 balanced_level_assignments <- function(n_total, K) {
   rep_len(seq_len(K), n_total)
+}
+
+# ===========================================================================
+# Randomisation / baseline-imbalance grid simulator
+# ===========================================================================
+#
+# One simulator covering the cells the two older bespoke functions cannot
+# express: a RANDOMISED DiD (pre-treatment data on a randomised allocation),
+# an UNRANDOMISED post-only study, cluster randomisation, and studies whose
+# randomisation label is wrong. simulate_rct_imbalance() and
+# simulate_did_rct_imbalance() hard-code "DiD = unrandomised bivariate,
+# RCT = unrandomised cross-section", which is exactly the confound under test.
+#
+# Every study is emitted with a `randomisation` column, so the fitted model can
+# be asked to honour it (baseline_imbalance = "by_randomisation"), ignore it
+# ("estimated"), or zero it out ("fixed_zero").
+
+# Draw a paired (pre, post) arm. When m/icc are supplied the arm is clustered:
+# a cluster random effect with variance icc * sd^2 is shared by both periods,
+# leaving (1 - icc) * sd^2 for individual noise, so the marginal variance is
+# still sd^2 but the arm MEAN carries a design effect of 1 + (m - 1) * icc.
+.draw_arm_paired <- function(n, mu_pre, mu_post, sd, rho, m = NA, icc = NA) {
+  clustered <- !is.na(m) && !is.na(icc) && icc > 0
+  if (!clustered) {
+    Sigma <- sd^2 * matrix(c(1, rho, rho, 1), 2, 2)
+    return(MASS::mvrnorm(n, c(mu_pre, mu_post), Sigma))
+  }
+  n_clusters <- max(2L, ceiling(n / m))
+  cl    <- rep(seq_len(n_clusters), length.out = n)
+  u     <- stats::rnorm(n_clusters, 0, sqrt(icc * sd^2))[cl]
+  Sigma <- (1 - icc) * sd^2 * matrix(c(1, rho, rho, 1), 2, 2)
+  e     <- MASS::mvrnorm(n, c(0, 0), Sigma)
+  cbind(mu_pre + u + e[, 1], mu_post + u + e[, 2])
+}
+
+# Draw a single-period arm, with the same optional clustering.
+.draw_arm_single <- function(n, mu, sd, m = NA, icc = NA) {
+  clustered <- !is.na(m) && !is.na(icc) && icc > 0
+  if (!clustered) return(stats::rnorm(n, mu, sd))
+  n_clusters <- max(2L, ceiling(n / m))
+  cl <- rep(seq_len(n_clusters), length.out = n)
+  u  <- stats::rnorm(n_clusters, 0, sqrt(icc * sd^2))[cl]
+  mu + u + stats::rnorm(n, 0, sqrt((1 - icc) * sd^2))
+}
+
+# Per-study true gamma plus the randomisation LABEL the analyst would supply.
+#
+# The first n_randomised studies are labelled randomised. Of those, a fraction
+# mislabel_rate are not actually randomised -- their gamma still comes from the
+# non-randomised population -- which is how the cost of a wrong label is priced.
+.draw_gamma_spec <- function(n_studies, n_randomised, gamma_mean, gamma_sd,
+                             sign_flip, kappa_true, s_sampling,
+                             mislabel_rate, cluster_size, icc) {
+  if (n_studies == 0) {
+    return(list(gamma = numeric(0), label = character(0), clustered = logical(0)))
+  }
+  n_randomised <- min(n_randomised, n_studies)
+  label <- c(rep("labelled", n_randomised), rep("none", n_studies - n_randomised))
+
+  # Which of the labelled-randomised studies are genuinely randomised.
+  n_mislabelled <- round(mislabel_rate * n_randomised)
+  truly <- rep(FALSE, n_studies)
+  if (n_randomised > 0) {
+    truly[seq_len(n_randomised)] <- TRUE
+    if (n_mislabelled > 0) truly[seq_len(n_mislabelled)] <- FALSE
+  }
+
+  is_cluster <- !is.na(cluster_size) && !is.na(icc)
+  label[label == "labelled"] <- if (is_cluster) "cluster" else "individual"
+
+  # Non-randomised gamma. sign_flip keeps the magnitude but randomises the
+  # direction study by study, so the population mean is zero while the spread
+  # is unchanged -- the case that separates "magnitude transports" from
+  # "direction transports".
+  signs <- if (sign_flip) sample(c(-1, 1), n_studies, replace = TRUE) else rep(1, n_studies)
+  gamma_non_rand <- stats::rnorm(n_studies, signs * gamma_mean, gamma_sd)
+
+  # Randomised gamma: zero-centred and scaled to the study's own sampling SD,
+  # inflated by the design effect when the allocation is clustered.
+  deff <- if (is_cluster) 1 + (cluster_size - 1) * icc else 1
+  gamma_rand <- stats::rnorm(n_studies, 0, kappa_true * sqrt(deff) * s_sampling)
+
+  list(
+    gamma     = ifelse(truly, gamma_rand, gamma_non_rand),
+    label     = label,
+    clustered = truly & is_cluster
+  )
+}
+
+simulate_imbalance_grid <- function(config) {
+  dgp <- config$dgp
+  fit <- config$fit
+
+  n_c <- dgp$n_control
+  n_t <- dgp$n_treatment
+  # Sampling SD of the observed baseline contrast under simple random sampling,
+  # on the raw scale. kappa_true is expressed as a multiple of this.
+  s_sampling <- sqrt(dgp$within_sd^2 / n_t + dgp$within_sd^2 / n_c)
+
+  spec_did <- .draw_gamma_spec(
+    dgp$n_did, dgp$n_randomised_did, dgp$did_gamma_mean, dgp$did_gamma_sd,
+    dgp$did_gamma_sign_flip, dgp$kappa_true, s_sampling,
+    dgp$mislabel_rate, dgp$cluster_size, dgp$icc
+  )
+  spec_rct <- .draw_gamma_spec(
+    dgp$n_rct, dgp$n_randomised_rct, dgp$rct_gamma_mean, dgp$rct_gamma_sd,
+    dgp$rct_gamma_sign_flip, dgp$kappa_true, s_sampling,
+    dgp$mislabel_rate, dgp$cluster_size, dgp$icc
+  )
+
+  # The label the analyst supplies need not match the truth. Overriding it lets
+  # a scenario understate the design (calling a cluster-randomised study
+  # individually randomised) without changing the data-generating process.
+  ovr <- dgp$randomisation_label_override
+  if (!is.null(ovr) && !is.na(ovr)) {
+    spec_did$label[spec_did$label != "none"] <- ovr
+    spec_rct$label[spec_rct$label != "none"] <- ovr
+  }
+
+  # --- Draw raw observations, keeping them so either data format can be built --
+  did_raw <- lapply(seq_len(dgp$n_did), function(i) NULL)
+  rct_raw <- lapply(seq_len(dgp$n_rct), function(i) NULL)
+
+  if (dgp$n_did > 0) {
+    thetas    <- stats::rnorm(dgp$n_did, dgp$true_effect, dgp$sigma_effect)
+    betas     <- stats::rnorm(dgp$n_did, dgp$true_trend,  dgp$sigma_trend)
+    baselines <- stats::rnorm(dgp$n_did, dgp$baseline_mean, dgp$baseline_sd)
+    did_raw <- lapply(seq_len(dgp$n_did), function(i) {
+      b <- baselines[i]; g <- spec_did$gamma[i]
+      m   <- if (spec_did$clustered[i]) dgp$cluster_size else NA
+      icc <- if (spec_did$clustered[i]) dgp$icc          else NA
+      list(
+        ctrl = .draw_arm_paired(n_c, b,     b + betas[i],
+                                dgp$within_sd, dgp$rho, m, icc),
+        trt  = .draw_arm_paired(n_t, b + g, b + g + betas[i] + thetas[i],
+                                dgp$within_sd, dgp$rho, m, icc)
+      )
+    })
+  }
+
+  if (dgp$n_rct > 0) {
+    thetas    <- stats::rnorm(dgp$n_rct, dgp$true_effect, dgp$sigma_effect)
+    baselines <- stats::rnorm(dgp$n_rct, dgp$baseline_mean, dgp$baseline_sd)
+    rct_raw <- lapply(seq_len(dgp$n_rct), function(i) {
+      b <- baselines[i]; g <- spec_rct$gamma[i]
+      m   <- if (spec_rct$clustered[i]) dgp$cluster_size else NA
+      icc <- if (spec_rct$clustered[i]) dgp$icc          else NA
+      list(
+        ctrl = .draw_arm_single(n_c, b,                  dgp$within_sd, m, icc),
+        trt  = .draw_arm_single(n_t, b + g + thetas[i],  dgp$within_sd, m, icc)
+      )
+    })
+  }
+
+  pp_raw    <- lapply(seq_len(dgp$n_pp), function(i) NULL)
+  pp_gammas <- numeric(dgp$n_pp)
+  if (dgp$n_pp > 0) {
+    thetas    <- stats::rnorm(dgp$n_pp, dgp$true_effect, dgp$sigma_effect)
+    betas     <- stats::rnorm(dgp$n_pp, dgp$true_trend,  dgp$sigma_trend)
+    baselines <- stats::rnorm(dgp$n_pp, dgp$baseline_mean, dgp$baseline_sd)
+    pp_gammas <- stats::rnorm(dgp$n_pp, dgp$pp_gamma_mean, dgp$pp_gamma_sd)
+    # Only the treated arm is observed. It starts at the latent CONTROL baseline
+    # plus the selection imbalance, exactly as the treated arm of a DiD study
+    # does -- the difference is that no control arm is measured, so the study
+    # must normalise by this quantity rather than by the control baseline.
+    pp_raw <- lapply(seq_len(dgp$n_pp), function(i) {
+      b <- baselines[i] + pp_gammas[i]
+      .draw_arm_paired(n_t, b, b + betas[i] + thetas[i],
+                       dgp$within_sd, dgp$rho, NA, NA)
+    })
+  }
+
+  # --- Emit in the requested format ------------------------------------------
+  if (identical(fit$data_format, "individual")) {
+    frames <- list()
+    if (dgp$n_did > 0) {
+      frames$did <- purrr::map_dfr(seq_len(dgp$n_did), function(i) {
+        d <- did_raw[[i]]
+        tibble(
+          study_id      = paste0("did_", i),
+          design        = "did",
+          randomisation = spec_did$label[i],
+          group         = rep(c("control", "treatment"), c(2 * n_c, 2 * n_t)),
+          time          = c(rep(c("pre", "post"), each = n_c),
+                            rep(c("pre", "post"), each = n_t)),
+          value         = c(d$ctrl[, 1], d$ctrl[, 2], d$trt[, 1], d$trt[, 2]),
+          subject_id    = paste0("did_", i, "_",
+                                 c(rep(paste0("c", seq_len(n_c)), 2),
+                                   rep(paste0("t", seq_len(n_t)), 2)))
+        )
+      })
+    }
+    if (dgp$n_rct > 0) {
+      frames$rct <- purrr::map_dfr(seq_len(dgp$n_rct), function(i) {
+        d <- rct_raw[[i]]
+        tibble(
+          study_id      = paste0("rct_", i),
+          design        = "rct",
+          randomisation = spec_rct$label[i],
+          group         = rep(c("control", "treatment"), c(n_c, n_t)),
+          time          = "post",
+          value         = c(d$ctrl, d$trt),
+          subject_id    = paste0("rct_", i, "_", seq_len(n_c + n_t))
+        )
+      })
+    }
+    if (dgp$n_pp > 0) {
+      frames$pp <- purrr::map_dfr(seq_len(dgp$n_pp), function(i) {
+        trt <- pp_raw[[i]]
+        tibble(
+          study_id      = paste0("pp_", i),
+          design        = "pp",
+          randomisation = "none",
+          group         = "treatment",
+          time          = rep(c("pre", "post"), each = n_t),
+          value         = c(trt[, 1], trt[, 2]),
+          subject_id    = paste0("pp_", i, "_", rep(seq_len(n_t), 2))
+        )
+      })
+    }
+    ind <- bind_rows(frames)
+    if (!is.na(dgp$cluster_size)) ind$cluster_size <- dgp$cluster_size
+    if (!is.na(dgp$icc))          ind$icc          <- dgp$icc
+    return(list(
+      data        = list(individual_data = ind),
+      true_params = build_true_params(dgp, config$true, fit$normalise)
+    ))
+  }
+
+  frames <- list()
+  if (dgp$n_did > 0) {
+    frames$did <- purrr::map_dfr(seq_len(dgp$n_did), function(i) {
+      d <- did_raw[[i]]; ctrl <- d$ctrl; trt <- d$trt
+      tibble(
+        study_id            = paste0("did_", i),
+        design              = "did",
+        randomisation       = spec_did$label[i],
+        n_control           = n_c,
+        n_treatment         = n_t,
+        mean_pre_control    = mean(ctrl[, 1]),
+        mean_post_control   = mean(ctrl[, 2]),
+        sd_pre_control      = stats::sd(ctrl[, 1]),
+        sd_post_control     = stats::sd(ctrl[, 2]),
+        mean_pre_treatment  = mean(trt[, 1]),
+        mean_post_treatment = mean(trt[, 2]),
+        sd_pre_treatment    = stats::sd(trt[, 1]),
+        sd_post_treatment   = stats::sd(trt[, 2]),
+        rho = (stats::cor(ctrl[, 1], ctrl[, 2]) + stats::cor(trt[, 1], trt[, 2])) / 2
+      )
+    })
+  }
+  if (dgp$n_rct > 0) {
+    frames$rct <- purrr::map_dfr(seq_len(dgp$n_rct), function(i) {
+      d <- rct_raw[[i]]
+      tibble(
+        study_id            = paste0("rct_", i),
+        design              = "rct",
+        randomisation       = spec_rct$label[i],
+        n_control           = n_c,
+        n_treatment         = n_t,
+        mean_post_control   = mean(d$ctrl),
+        sd_post_control     = stats::sd(d$ctrl),
+        mean_post_treatment = mean(d$trt),
+        sd_post_treatment   = stats::sd(d$trt)
+      )
+    })
+  }
+
+  if (dgp$n_pp > 0) {
+    frames$pp <- purrr::map_dfr(seq_len(dgp$n_pp), function(i) {
+      trt <- pp_raw[[i]]
+      tibble(
+        study_id            = paste0("pp_", i),
+        design              = "pp",
+        randomisation       = "none",
+        n_treatment         = n_t,
+        mean_pre_treatment  = mean(trt[, 1]),
+        mean_post_treatment = mean(trt[, 2]),
+        sd_pre_treatment    = stats::sd(trt[, 1]),
+        sd_post_treatment   = stats::sd(trt[, 2]),
+        rho                 = stats::cor(trt[, 1], trt[, 2])
+      )
+    })
+  }
+
+  summary_df <- bind_rows(frames)
+  if (!is.na(dgp$cluster_size)) summary_df$cluster_size <- dgp$cluster_size
+  if (!is.na(dgp$icc))          summary_df$icc          <- dgp$icc
+
+  list(
+    data        = list(summary_data = summary_df),
+    true_params = build_true_params(dgp, config$true, fit$normalise)
+  )
 }
