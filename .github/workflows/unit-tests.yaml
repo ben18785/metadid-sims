@@ -33,11 +33,38 @@ jobs:
       # argument list of the metadid function it targets, so metadid must be
       # present -- that check is what catches the API drifting out from under
       # the sims. No CmdStan needed: nothing here samples.
+      #
+      # Which metadid, though, is the whole question. The two repos change
+      # together: a sims branch that uses a new metadid argument is only
+      # coherent against the metadid branch that added it. Checking out main
+      # unconditionally makes every such branch fail CI for a mismatch that is
+      # not real -- which is exactly what happened when this workflow was first
+      # written. So: prefer a metadid branch of the SAME NAME when one exists,
+      # and fall back to main when it does not.
+      - name: Resolve the metadid branch to test against
+        id: mdref
+        run: |
+          BR="${{ github.head_ref || github.ref_name }}"
+          REPO=https://github.com/ben18785/metadid.git
+          if git ls-remote --exit-code --heads "$REPO" "$BR" >/dev/null 2>&1; then
+            echo "Found matching metadid branch: $BR"
+            echo "ref=$BR" >> "$GITHUB_OUTPUT"
+          else
+            echo "No metadid branch named $BR; falling back to main"
+            echo "ref=main" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout metadid
         uses: actions/checkout@v4
         with:
           repository: ben18785/metadid
+          ref: ${{ steps.mdref.outputs.ref }}
           path: metadid
+
+      - name: Report which metadid is under test
+        run: |
+          echo "metadid ref: ${{ steps.mdref.outputs.ref }}"
+          git -C metadid log --oneline -1
 
       - uses: r-lib/actions/setup-r@v2
         with:

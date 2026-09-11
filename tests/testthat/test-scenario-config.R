@@ -55,9 +55,17 @@ test_that("every fit-config key is a real argument of the function it targets", 
       unknown <- setdiff(names(fit), c(names(formals(fn)), harness_only))
       expect_equal(
         unknown, character(0),
-        info = paste0(sid, " / ", arm$label %||% "default",
-                      ": fit config sets keys that ", fit$fn %||% "meta_did",
-                      "() does not accept: ", paste(unknown, collapse = ", "))
+        info = paste0(
+          sid, " / ", arm$label %||% "default",
+          ": fit config sets keys that ", fit$fn %||% "meta_did",
+          "() does not accept: ", paste(unknown, collapse = ", "),
+          ".\nIf these are arguments metadid gained recently, the INSTALLED ",
+          "metadid is older than the one these scenarios were written for -- ",
+          "reinstall it (R CMD INSTALL ../metadid), and in CI check that the ",
+          "metadid branch being tested against matches this one. Installed ",
+          "metadid: ", as.character(utils::packageVersion("metadid")), " at ",
+          find.package("metadid"), "."
+        )
       )
     }
   }
