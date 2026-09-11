@@ -77,10 +77,37 @@ jobs:
           extra-packages: any::testthat
           cache-version: 1
 
-      # Installed without its Stan model compiling, which needs no CmdStan --
-      # the tests only read metadid's R-level argument lists.
-      - name: Install metadid (R level only)
-        run: R CMD INSTALL --no-byte-compile --no-test-load ./metadid || true
+      # --no-libs skips src/install.libs.R, which calls
+      # instantiate::stan_package_compile() and therefore needs CmdStan. The
+      # unit tests fit nothing -- they only need metadid attachable and its
+      # argument lists readable -- so compiling the model here would add ten
+      # minutes to buy nothing.
+      #
+      # NOT `|| true`. An install that fails silently leaves metadid absent,
+      # and R/simulate.R and R/fit.R both call library(metadid), so every test
+      # would error for a reason with nothing to do with the tests. Worse, a
+      # skipped guard reads the same as a passing one -- the exact failure this
+      # PR spent its time removing from metadid's own CI.
+      - name: Install metadid (R level only, no Stan compilation)
+        run: R CMD INSTALL --no-libs --no-byte-compile --no-test-load ./metadid
+
+      # Fail here, with a legible message, rather than inside the suite.
+      - name: Verify metadid is usable and current
+        run: |
+          Rscript -e '
+            suppressMessages(library(metadid))
+            cat("metadid at:", find.package("metadid"), "\n")
+            need <- c("mu_gamma", "kappa", "allow_unidentified_kappa",
+                      "cluster_deff_default")
+            missing <- setdiff(need, names(formals(metadid::meta_did)))
+            if (length(missing)) {
+              stop("The metadid checked out here is missing arguments these ",
+                   "scenarios use: ", paste(missing, collapse = ", "),
+                   ". Check the branch pairing step above -- the sims branch ",
+                   "and the metadid branch must correspond.", call. = FALSE)
+            }
+            cat("metadid API matches what the scenarios expect\n")
+          '
 
       - name: Run unit tests
         working-directory: metadid-sims
