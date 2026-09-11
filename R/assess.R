@@ -36,6 +36,37 @@ assess_one <- function(posteriors, true_params, fit_config) {
     param_map$baseline_control_mean <- "baseline_mean"
   }
 
+  # --- Baseline-imbalance (gamma) block --------------------------------------
+  # Previously unscored: the P-category measured gamma's downstream effect on
+  # the pooled treatment effect but never checked whether gamma itself was
+  # recovered. build_true_params() emits these only when a true value exists
+  # (see the note there); the lookup below silently drops the rest, and
+  # baseline_difference_mean is likewise dropped when the model pins it at zero
+  # (mu_gamma = "zero"), since a constant has nothing to recover.
+  param_map$baseline_difference_mean <- paste0("baseline_difference_mean", suffix)
+  param_map$baseline_difference_sd   <- paste0("baseline_difference_sd", suffix)
+  param_map$kappa                    <- "kappa"
+
+  # A parameter that was pinned rather than sampled has zero posterior SD;
+  # scoring it as "recovered" would be a free pass. Dropped below.
+  pinned <- posteriors$parameter[!is.na(posteriors$sd) & posteriors$sd == 0]
+  if (length(pinned) > 0) {
+    param_map <- param_map[!names(param_map) %in% pinned]
+  }
+
+  # When mu_gamma is pinned at zero, a real population MEAN has nowhere to go
+  # but the spread: the model's tau_gamma then targets sqrt(mu^2 + tau^2), not
+  # tau. Scoring it against tau alone marks correct behaviour as a failure --
+  # which is precisely what the zero-mean and two-population arms do in the
+  # transport scenarios, where the true DiD imbalance is strongly one-sided.
+  if (identical(fit_config$mu_gamma %||% "zero", "zero")) {
+    mcol <- paste0("baseline_difference_mean", suffix)
+    scol <- paste0("baseline_difference_sd",   suffix)
+    if (all(c(mcol, scol) %in% names(true_params))) {
+      true_params[[scol]] <- sqrt(true_params[[mcol]]^2 + true_params[[scol]]^2)
+    }
+  }
+
   # Covariates
   cov_cols <- grep("^beta_cov_.*_raw$", names(true_params), value = TRUE)
   if (length(cov_cols) > 0) {

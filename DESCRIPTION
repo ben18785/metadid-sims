@@ -38,3 +38,5 @@ Imports:
     tidyr,
     tidyselect,
     withr
+Suggests:
+    testthat (>= 3.0.0)

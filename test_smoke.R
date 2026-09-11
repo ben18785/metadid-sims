@@ -49,7 +49,15 @@ cat("\n=== metadid-sims smoke test ===\n\n")
 # ---------------------------------------------------------------------------
 
 cat("run_one_rep (standard scenarios):\n")
-for (sid in c("A1", "B1", "C1", "D1", "E1", "F1", "H1", "H2", "H3", "H4", "I1", "I8")) {
+# Category X entries chosen to cover the distinct paths through
+# simulate_imbalance_grid(), which the other categories never touch:
+#   X2  transport -- non-randomised DiD alongside randomised post-only studies
+#   X11 randomised DiD with a real imbalance (the kappa = 0 hard-zero arm)
+#   X16 cluster randomisation, design effect taken from cluster_size and icc
+#   X23 individual-level data, where s_i is a Stan parameter rather than data
+#   X24 pre-post studies, i.e. the third design and the scale-mismatch sweep
+for (sid in c("A1", "B1", "C1", "D1", "E1", "F1", "H1", "H2", "H3", "H4", "I1", "I8",
+              "X2", "X11", "X16", "X23", "X24")) {
   cfg <- SCENARIO_CONFIGS[[sid]]
   run_test(sid, run_one_rep(sid, cfg, rep_seed = 1L))
 }

@@ -80,12 +80,27 @@ fit_scenario <- function(sim_result, fit_config) {
     args$correlated_effects <- TRUE
   }
 
+  # Baseline-imbalance options. Both meta_did() and meta_did_general() accept
+  # these, so they are passed regardless of which entry point an arm uses --
+  # that is what lets a "full" and a "naive" arm differ only in gamma handling.
+  args$baseline_imbalance   <- fit_config$baseline_imbalance   %||% "by_randomisation"
+  args$mu_gamma             <- fit_config$mu_gamma             %||% "zero"
+  args$kappa                <- fit_config$kappa                %||% 0.5
+  args$cluster_deff_default <- fit_config$cluster_deff_default %||% 2
+  args$allow_unidentified_kappa <- fit_config$allow_unidentified_kappa %||% FALSE
+
   # meta_did_general-specific options
   if (identical(fit_config$fn, "meta_did_general")) {
-    args$time_trend         <- fit_config$time_trend
-    args$baseline_imbalance <- fit_config$baseline_imbalance
-    args$pp_likelihood      <- fit_config$pp_likelihood
+    args$time_trend    <- fit_config$time_trend
+    args$pp_likelihood <- fit_config$pp_likelihood
   }
+
+  # Thousands of fits run headless; the per-fit advisory about a missing
+  # randomisation column would drown the logs. The scenarios set the column
+  # deliberately, so its absence is a choice here rather than an oversight.
+  old_quiet <- getOption("metadid.quiet")
+  options(metadid.quiet = TRUE)
+  on.exit(options(metadid.quiet = old_quiet), add = TRUE)
 
   # Call the fitting function
   fit_fn <- switch(
@@ -148,7 +163,12 @@ extract_posteriors <- function(fit) {
 
   # Additional parameters to extract directly from Stan draws
   extra_params <- intersect(
-    c("time_trend_mean", "time_trend_sd", "baseline_control_mean"),
+    c("time_trend_mean", "time_trend_sd", "baseline_control_mean",
+      # Baseline-imbalance block. baseline_difference_mean and kappa are
+      # transformed parameters that exist whether or not they are sampled, so
+      # they always resolve; a pinned one has zero posterior SD and assess_one()
+      # drops it rather than crediting a constant with perfect recovery.
+      "baseline_difference_mean", "baseline_difference_sd", "kappa"),
     fit$fit$metadata()$stan_variables
   )
 

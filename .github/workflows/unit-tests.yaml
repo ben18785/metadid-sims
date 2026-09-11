@@ -1,0 +1,95 @@
+# Fast unit tests for the simulation scaffolding.
+#
+# Distinct from sims.yaml, which runs the targets pipeline (hours, gated on an
+# upstream metadid commit). This job fits nothing and finishes in under a
+# minute, so it can run on every push -- which is what makes it useful as a
+# guard rather than a post-mortem.
+#
+# What it protects: in a simulation study a bug in the deterministic
+# scaffolding does not error, it produces a plausible wrong number. A mistaken
+# truth value, a mis-mapped parameter, or a DGP that does not generate what the
+# scenario asked for all silently invalidate every result downstream.
+name: unit-tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout metadid-sims
+        uses: actions/checkout@v4
+        with:
+          path: metadid-sims
+
+      # The scenario-config tests check every fit-config key against the real
+      # argument list of the metadid function it targets, so metadid must be
+      # present -- that check is what catches the API drifting out from under
+      # the sims. No CmdStan needed: nothing here samples.
+      #
+      # Which metadid, though, is the whole question. The two repos change
+      # together: a sims branch that uses a new metadid argument is only
+      # coherent against the metadid branch that added it. Checking out main
+      # unconditionally makes every such branch fail CI for a mismatch that is
+      # not real -- which is exactly what happened when this workflow was first
+      # written. So: prefer a metadid branch of the SAME NAME when one exists,
+      # and fall back to main when it does not.
+      - name: Resolve the metadid branch to test against
+        id: mdref
+        run: |
+          BR="${{ github.head_ref || github.ref_name }}"
+          REPO=https://github.com/ben18785/metadid.git
+          if git ls-remote --exit-code --heads "$REPO" "$BR" >/dev/null 2>&1; then
+            echo "Found matching metadid branch: $BR"
+            echo "ref=$BR" >> "$GITHUB_OUTPUT"
+          else
+            echo "No metadid branch named $BR; falling back to main"
+            echo "ref=main" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout metadid
+        uses: actions/checkout@v4
+        with:
+          repository: ben18785/metadid
+          ref: ${{ steps.mdref.outputs.ref }}
+          path: metadid
+
+      - name: Report which metadid is under test
+        run: |
+          echo "metadid ref: ${{ steps.mdref.outputs.ref }}"
+          git -C metadid log --oneline -1
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+          extra-repositories: "https://mc-stan.org/r-packages/"
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          working-directory: metadid-sims
+          extra-packages: any::testthat
+          cache-version: 1
+
+      # Installed without its Stan model compiling, which needs no CmdStan --
+      # the tests only read metadid's R-level argument lists.
+      - name: Install metadid (R level only)
+        run: R CMD INSTALL --no-byte-compile --no-test-load ./metadid || true
+
+      - name: Run unit tests
+        working-directory: metadid-sims
+        run: |
+          Rscript -e '
+            res <- testthat::test_dir("tests/testthat", reporter = "summary",
+                                      stop_on_failure = FALSE)
+            d <- as.data.frame(res)
+            cat(sprintf("tests %d | failed %d | skipped %d | errored %d\n",
+                nrow(d), sum(d$failed > 0), sum(d$skipped > 0), sum(d$error)))
+            if (sum(d$failed > 0) + sum(d$error) > 0) quit(status = 1)
+          '

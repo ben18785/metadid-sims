@@ -16,8 +16,15 @@
 #   fit:  Model fitting options
 #     fn              "meta_did" or "meta_did_general"
 #     normalise              logical — TRUE expresses effects as fractions of
-#                            the treatment-pre baseline, FALSE pools on the
-#                            absolute (user-units) scale
+#                            each study's own baseline, FALSE pools on the
+#                            absolute (user-units) scale. The denominator is
+#                            per-design: DiD divides by mean_pre_control, RCT by
+#                            mean_post_control (no pre data), and only pre-post
+#                            by mean_pre_treatment, because it has no control
+#                            arm. So gamma is fractional relative to the CONTROL
+#                            baseline, matching the Stan model, where
+#                            normalisation fixes baseline_control at 1 and makes
+#                            the treatment baseline 1 + gamma.
 #     robust_heterogeneity, design_effects, correlated_effects
 #     hierarchical_rho
 #     time_trend, baseline_imbalance, pp_likelihood (for meta_did_general)
@@ -56,7 +63,57 @@ default_dgp <- list(
   n_control        = 100L,
   n_treatment      = 100L,
   covariates       = NULL,
-  beta_cov         = NULL
+  beta_cov         = NULL,
+
+  # --- Baseline imbalance (gamma) and assignment mechanism -------------------
+  # Used by simulate_imbalance_grid(). The standard simulate_meta_did() path
+  # has gamma == 0 for every study, so these are inert there.
+  #
+  # gamma_mean / gamma_sd describe the NON-RANDOMISED imbalance population for
+  # each design. sign_flip draws from a symmetric +/-mean mixture instead of a
+  # common sign: same magnitude, no shared direction. That is the case that
+  # isolates whether the DIRECTION of selection transports between studies,
+  # as opposed to its size.
+  did_gamma_mean      = 0,
+  did_gamma_sd        = 0,
+  did_gamma_sign_flip = FALSE,
+  rct_gamma_mean      = 0,
+  rct_gamma_sd        = 0,
+  rct_gamma_sign_flip = FALSE,
+
+  # Pre-post studies have no control arm, so they carry no gamma PARAMETER in
+  # metadid -- but their treated group is still selected, and its baseline still
+  # differs from the latent control baseline by pp_gamma. That matters because a
+  # PP study can only normalise by its own treatment-arm pre mean, b*(1+gamma/b),
+  # while DiD and RCT normalise by the CONTROL baseline b. So a non-zero
+  # pp_gamma puts PP effects on a scale differing from every other design's by
+  # 1/(1 + gamma/b), even though all of them are pooled into one mu_theta.
+  pp_gamma_mean       = 0,
+  pp_gamma_sd         = 0,
+
+  # The first n_randomised_* studies of each design are truly randomised: their
+  # gamma is drawn from N(0, (kappa_true * s_i)^2) rather than the population
+  # above, with s_i the sampling SD of that study's baseline contrast.
+  # kappa_true = 0 is perfect randomisation.
+  n_randomised_did    = 0L,
+  n_randomised_rct    = 0L,
+  kappa_true          = 0,
+
+  # Fraction of studies LABELLED randomised whose gamma is actually drawn from
+  # the non-randomised population -- the analyst's claim is wrong. Prices the
+  # cost of the randomisation column being trusted when it should not be.
+  mislabel_rate       = 0,
+
+  # Cluster randomisation: when set, randomised studies get clustered data
+  # (cluster random effect with variance icc * within_sd^2), so their arm means
+  # carry a genuine design effect of 1 + (cluster_size - 1) * icc.
+  cluster_size        = NA_real_,
+  icc                 = NA_real_,
+
+  # Overrides the randomisation LABEL emitted to the fit without changing the
+  # data-generating process -- e.g. calling a cluster-randomised study
+  # "individual" to see what understating the design costs.
+  randomisation_label_override = NA_character_
 )
 
 default_fit <- list(
@@ -67,7 +124,15 @@ default_fit <- list(
   correlated_effects       = FALSE,
   hierarchical_rho         = TRUE,
   time_trend               = "pooled",
-  baseline_imbalance       = "estimated",
+  # "by_randomisation" (metadid's default) splits gamma into a non-randomised
+  # population and a zero-centred, sample-size-scaled randomised one;
+  # "estimated" pools every study into one population (the pre-0.2 behaviour);
+  # "fixed_zero" pins gamma at 0 for RCTs.
+  baseline_imbalance       = "by_randomisation",
+  mu_gamma                 = "zero",
+  kappa                    = 0.5,
+  allow_unidentified_kappa = FALSE,
+  cluster_deff_default     = 2,
   pp_likelihood            = "differenced",
   covariates               = NULL,
   multiplicative_covariate = NULL,
@@ -79,6 +144,54 @@ default_fit <- list(
 # panel code derives "studies added" instead of hard-coding the value.
 K_CORE <- 5L    # category K (panel B): small core, default effect heterogeneity
 S_CORE <- 15L   # category S (panel E): high effect heterogeneity
+
+# ---------------------------------------------------------------------------
+# Category X fit arms (baseline-imbalance / randomisation)
+# ---------------------------------------------------------------------------
+#
+#   shared     -- one gamma population with an estimated mean, applied to every
+#                 study regardless of assignment mechanism. metadid's default
+#                 before the randomisation work; the arm the others are judged
+#                 against.
+#   zero_mean  -- one gamma population, mean pinned at 0. Magnitude of
+#                 imbalance transports between studies, direction does not.
+#   two_pop    -- non-randomised studies keep the pooled population; randomised
+#                 ones get N(0, (kappa * s_i)^2). The current default.
+#   fixed_zero -- gamma == 0 for post-only studies (the naive comparator).
+X_ARMS <- list(
+  list(label = "shared",     baseline_imbalance = "estimated",        mu_gamma = "estimated"),
+  list(label = "zero_mean",  baseline_imbalance = "estimated",        mu_gamma = "zero"),
+  list(label = "two_pop",    baseline_imbalance = "by_randomisation", mu_gamma = "zero", kappa = 0.5),
+  list(label = "fixed_zero", baseline_imbalance = "fixed_zero",       mu_gamma = "zero")
+)
+
+# kappa sweep arms, for the scenarios that ask what a fixed kappa costs.
+X_KAPPA_ARMS <- function(kappas = c(0, 0.5, 1, 2), estimate = FALSE,
+                         unanchored = FALSE) {
+  arms <- lapply(kappas, function(k) {
+    list(label = paste0("kappa_", k), baseline_imbalance = "by_randomisation",
+         mu_gamma = "zero", kappa = k)
+  })
+  if (estimate) {
+    arms <- c(arms, list(list(label = "kappa_est",
+                              baseline_imbalance = "by_randomisation",
+                              mu_gamma = "zero", kappa = "estimate")))
+  }
+  # Sampling kappa with nothing to anchor it. Its posterior just reproduces the
+  # prior, so this is not an estimate -- it makes the marginal prior on gamma a
+  # scale mixture of normals, more peaked at zero and much heavier-tailed than
+  # any fixed kappa. The claim is that this buys robustness when a study's
+  # randomisation label is WRONG, letting that study's gamma grow without
+  # inflating every other randomised study's. Only the mislabelling scenarios
+  # can confirm or refute that, which is why the arm lives there.
+  if (unanchored) {
+    arms <- c(arms, list(list(label = "kappa_unanchored",
+                              baseline_imbalance = "by_randomisation",
+                              mu_gamma = "zero", kappa = "estimate",
+                              allow_unidentified_kappa = TRUE)))
+  }
+  arms
+}
 
 # Helper: merge user overrides into defaults
 scenario <- function(description, dgp = list(), fit = list(),
@@ -298,7 +411,7 @@ SCENARIO_CONFIGS <- list(
   ),
 
   B5 = scenario(
-    "RCT baseline imbalance (only in this design): full (estimated) vs naive (fixed zero), 10 DiD + 10 RCT",
+    "Unrandomised post-only imbalance (only in this design): pooled vs zero-mean vs naive, 10 DiD + 10 RCT",
     dgp = list(
       type           = "bespoke",
       bespoke_fn     = "simulate_rct_imbalance",
@@ -308,13 +421,16 @@ SCENARIO_CONFIGS <- list(
       rct_gamma_sd   = 0.02
     ),
     compare = list(
-      list(label = "full",  fn = "meta_did"),
-      list(label = "naive", fn = "meta_did_general", baseline_imbalance = "fixed_zero")
+      list(label = "full",      fn = "meta_did", baseline_imbalance = "estimated",
+           mu_gamma = "estimated"),
+      list(label = "zero_mean", fn = "meta_did", baseline_imbalance = "estimated",
+           mu_gamma = "zero"),
+      list(label = "naive",     fn = "meta_did_general", baseline_imbalance = "fixed_zero")
     )
   ),
 
   B6 = scenario(
-    "DiD imbalance > RCT imbalance: full vs naive, 15 DiD + 15 RCT",
+    "DiD imbalance > post-only imbalance: pooled vs zero-mean vs naive, 15 DiD + 15 RCT",
     dgp = list(
       type           = "bespoke",
       bespoke_fn     = "simulate_did_rct_imbalance",
@@ -326,8 +442,11 @@ SCENARIO_CONFIGS <- list(
       rct_gamma_sd   = 0.01
     ),
     compare = list(
-      list(label = "full",  fn = "meta_did"),
-      list(label = "naive", fn = "meta_did_general", baseline_imbalance = "fixed_zero")
+      list(label = "full",      fn = "meta_did", baseline_imbalance = "estimated",
+           mu_gamma = "estimated"),
+      list(label = "zero_mean", fn = "meta_did", baseline_imbalance = "estimated",
+           mu_gamma = "zero"),
+      list(label = "naive",     fn = "meta_did_general", baseline_imbalance = "fixed_zero")
     )
   ),
 
@@ -1559,15 +1678,26 @@ SCENARIO_CONFIGS <- list(
   ),
 
   # ---------------------------------------------------------------------------
-  # Category P: RCT baseline-imbalance sweep (figure panel H).
+  # Category P: UNRANDOMISED post-only imbalance sweep.
   # The gamma analogue of the panel-B trend sweep: naive (gamma = 0) bias
-  # grows at the RCT weight W_R; estimating imbalance with DiD borrowing
+  # grows at the post-only weight W_R; estimating imbalance with DiD borrowing
   # reduces (but does not remove) the slope - imbalance is only partially
   # identified from post-only data (cf. B5/B6).
+  #
+  # These studies are post-only comparisons with a NON-ZERO population
+  # imbalance, i.e. unrandomised -- the simulator now labels them
+  # randomisation = "none" explicitly. They are not randomised trials, and the
+  # sweep should not be read as "what imbalance costs an RCT". Category X asks
+  # the separate question of whether imbalance learned from one kind of study
+  # should transport to another.
+  #
+  # The `full` arm keeps mu_gamma = "estimated" (the pre-randomisation default)
+  # so the sweep still measures what it always measured; `zero_mean` adds the
+  # current default for comparison.
   # ---------------------------------------------------------------------------
 
   P1 = scenario(
-    "Figure panel H: RCT baseline imbalance, gamma mean 0",
+    "Unrandomised post-only imbalance, gamma mean 0",
     dgp = list(
       type           = "bespoke",
       bespoke_fn     = "simulate_rct_imbalance",
@@ -1577,13 +1707,16 @@ SCENARIO_CONFIGS <- list(
       rct_gamma_sd   = 0.02
     ),
     compare = list(
-      list(label = "full",  fn = "meta_did"),
-      list(label = "naive", fn = "meta_did_general", baseline_imbalance = "fixed_zero")
+      list(label = "full",      fn = "meta_did", baseline_imbalance = "estimated",
+           mu_gamma = "estimated"),
+      list(label = "zero_mean", fn = "meta_did", baseline_imbalance = "estimated",
+           mu_gamma = "zero"),
+      list(label = "naive",     fn = "meta_did_general", baseline_imbalance = "fixed_zero")
     )
   ),
 
   P2 = scenario(
-    "Figure panel H: RCT baseline imbalance, gamma mean 0.02",
+    "Unrandomised post-only imbalance, gamma mean 0.02",
     dgp = list(
       type           = "bespoke",
       bespoke_fn     = "simulate_rct_imbalance",
@@ -1593,13 +1726,16 @@ SCENARIO_CONFIGS <- list(
       rct_gamma_sd   = 0.02
     ),
     compare = list(
-      list(label = "full",  fn = "meta_did"),
-      list(label = "naive", fn = "meta_did_general", baseline_imbalance = "fixed_zero")
+      list(label = "full",      fn = "meta_did", baseline_imbalance = "estimated",
+           mu_gamma = "estimated"),
+      list(label = "zero_mean", fn = "meta_did", baseline_imbalance = "estimated",
+           mu_gamma = "zero"),
+      list(label = "naive",     fn = "meta_did_general", baseline_imbalance = "fixed_zero")
     )
   ),
 
   P3 = scenario(
-    "Figure panel H: RCT baseline imbalance, gamma mean 0.04",
+    "Unrandomised post-only imbalance, gamma mean 0.04",
     dgp = list(
       type           = "bespoke",
       bespoke_fn     = "simulate_rct_imbalance",
@@ -1609,13 +1745,16 @@ SCENARIO_CONFIGS <- list(
       rct_gamma_sd   = 0.02
     ),
     compare = list(
-      list(label = "full",  fn = "meta_did"),
-      list(label = "naive", fn = "meta_did_general", baseline_imbalance = "fixed_zero")
+      list(label = "full",      fn = "meta_did", baseline_imbalance = "estimated",
+           mu_gamma = "estimated"),
+      list(label = "zero_mean", fn = "meta_did", baseline_imbalance = "estimated",
+           mu_gamma = "zero"),
+      list(label = "naive",     fn = "meta_did_general", baseline_imbalance = "fixed_zero")
     )
   ),
 
   P4 = scenario(
-    "Figure panel H: RCT baseline imbalance, gamma mean 0.05",
+    "Unrandomised post-only imbalance, gamma mean 0.05",
     dgp = list(
       type           = "bespoke",
       bespoke_fn     = "simulate_rct_imbalance",
@@ -1625,13 +1764,16 @@ SCENARIO_CONFIGS <- list(
       rct_gamma_sd   = 0.02
     ),
     compare = list(
-      list(label = "full",  fn = "meta_did"),
-      list(label = "naive", fn = "meta_did_general", baseline_imbalance = "fixed_zero")
+      list(label = "full",      fn = "meta_did", baseline_imbalance = "estimated",
+           mu_gamma = "estimated"),
+      list(label = "zero_mean", fn = "meta_did", baseline_imbalance = "estimated",
+           mu_gamma = "zero"),
+      list(label = "naive",     fn = "meta_did_general", baseline_imbalance = "fixed_zero")
     )
   ),
 
   P5 = scenario(
-    "Figure panel H: RCT baseline imbalance, gamma mean 0.06",
+    "Unrandomised post-only imbalance, gamma mean 0.06",
     dgp = list(
       type           = "bespoke",
       bespoke_fn     = "simulate_rct_imbalance",
@@ -1641,13 +1783,16 @@ SCENARIO_CONFIGS <- list(
       rct_gamma_sd   = 0.02
     ),
     compare = list(
-      list(label = "full",  fn = "meta_did"),
-      list(label = "naive", fn = "meta_did_general", baseline_imbalance = "fixed_zero")
+      list(label = "full",      fn = "meta_did", baseline_imbalance = "estimated",
+           mu_gamma = "estimated"),
+      list(label = "zero_mean", fn = "meta_did", baseline_imbalance = "estimated",
+           mu_gamma = "zero"),
+      list(label = "naive",     fn = "meta_did_general", baseline_imbalance = "fixed_zero")
     )
   ),
 
   P6 = scenario(
-    "Figure panel H: RCT baseline imbalance, gamma mean 0.08",
+    "Unrandomised post-only imbalance, gamma mean 0.08",
     dgp = list(
       type           = "bespoke",
       bespoke_fn     = "simulate_rct_imbalance",
@@ -1657,13 +1802,16 @@ SCENARIO_CONFIGS <- list(
       rct_gamma_sd   = 0.02
     ),
     compare = list(
-      list(label = "full",  fn = "meta_did"),
-      list(label = "naive", fn = "meta_did_general", baseline_imbalance = "fixed_zero")
+      list(label = "full",      fn = "meta_did", baseline_imbalance = "estimated",
+           mu_gamma = "estimated"),
+      list(label = "zero_mean", fn = "meta_did", baseline_imbalance = "estimated",
+           mu_gamma = "zero"),
+      list(label = "naive",     fn = "meta_did_general", baseline_imbalance = "fixed_zero")
     )
   ),
 
   P7 = scenario(
-    "Figure panel H: RCT baseline imbalance, gamma mean 0.1",
+    "Unrandomised post-only imbalance, gamma mean 0.1",
     dgp = list(
       type           = "bespoke",
       bespoke_fn     = "simulate_rct_imbalance",
@@ -1673,9 +1821,426 @@ SCENARIO_CONFIGS <- list(
       rct_gamma_sd   = 0.02
     ),
     compare = list(
-      list(label = "full",  fn = "meta_did"),
-      list(label = "naive", fn = "meta_did_general", baseline_imbalance = "fixed_zero")
+      list(label = "full",      fn = "meta_did", baseline_imbalance = "estimated",
+           mu_gamma = "estimated"),
+      list(label = "zero_mean", fn = "meta_did", baseline_imbalance = "estimated",
+           mu_gamma = "zero"),
+      list(label = "naive",     fn = "meta_did_general", baseline_imbalance = "fixed_zero")
     )
+  ),
+
+  # ---------------------------------------------------------------------------
+  # Category X: randomisation and baseline imbalance
+  # ---------------------------------------------------------------------------
+  #
+  # The question the P sweep cannot answer. P varies the SIZE of imbalance in
+  # post-only studies that are all unrandomised, and asks what it costs the
+  # pooled effect. X varies WHICH STUDIES ARE RANDOMISED, and asks whether the
+  # imbalance estimated from one kind of study should be transported to another.
+  #
+  # Every X scenario uses simulate_imbalance_grid(), which -- unlike the older
+  # bespoke functions -- can emit a randomised DiD, an unrandomised post-only
+  # study, clustered allocation, and a wrong randomisation label.
+
+  # --- X1-X3: does a shared gamma population import DiD selection into RCTs? --
+  # Non-randomised DiD studies whose treated arms all start HIGH (a targeting
+  # rule), alongside genuinely randomised post-only trials. The `shared` arm
+  # estimates mu_gamma from the DiD studies and subtracts it from every RCT's
+  # effect; the bias should scale with the DiD imbalance and should NOT shrink
+  # as the DiD evidence sharpens.
+  X1 = scenario(
+    "Transport: DiD gamma 0.04 (one-sided), RCTs truly randomised",
+    dgp = list(
+      type = "bespoke", bespoke_fn = "simulate_imbalance_grid",
+      n_did = 10L, n_rct = 20L,
+      did_gamma_mean = 0.04, did_gamma_sd = 0.02,
+      n_randomised_rct = 20L, kappa_true = 0
+    ),
+    compare = X_ARMS
+  ),
+
+  X2 = scenario(
+    "Transport: DiD gamma 0.08 (one-sided), RCTs truly randomised",
+    dgp = list(
+      type = "bespoke", bespoke_fn = "simulate_imbalance_grid",
+      n_did = 10L, n_rct = 20L,
+      did_gamma_mean = 0.08, did_gamma_sd = 0.02,
+      n_randomised_rct = 20L, kappa_true = 0
+    ),
+    compare = X_ARMS
+  ),
+
+  X3 = scenario(
+    "Transport: DiD gamma 0.12 (one-sided), RCTs truly randomised",
+    dgp = list(
+      type = "bespoke", bespoke_fn = "simulate_imbalance_grid",
+      n_did = 10L, n_rct = 20L,
+      did_gamma_mean = 0.12, did_gamma_sd = 0.02,
+      n_randomised_rct = 20L, kappa_true = 0
+    ),
+    compare = X_ARMS
+  ),
+
+  # --- X4-X6: does DIRECTION transport, or only magnitude? -------------------
+  # Same imbalance magnitudes, but the sign flips study by study, so the
+  # population mean is zero while the spread is unchanged. `shared` should now
+  # be roughly unbiased -- mu_gamma has nothing to find -- but tau_gamma picks
+  # up the full magnitude and inflates every RCT. These scenarios isolate
+  # whether N(0, tau_gamma) is the RIGHT amount of conservatism or merely a
+  # safe one, which is the crux of the "direction does not carry over" claim.
+  X4 = scenario(
+    "Direction: DiD gamma +/-0.04 (sign-flipped), RCTs truly randomised",
+    dgp = list(
+      type = "bespoke", bespoke_fn = "simulate_imbalance_grid",
+      n_did = 10L, n_rct = 20L,
+      did_gamma_mean = 0.04, did_gamma_sd = 0.02, did_gamma_sign_flip = TRUE,
+      n_randomised_rct = 20L, kappa_true = 0
+    ),
+    compare = X_ARMS
+  ),
+
+  X5 = scenario(
+    "Direction: DiD gamma +/-0.08 (sign-flipped), RCTs truly randomised",
+    dgp = list(
+      type = "bespoke", bespoke_fn = "simulate_imbalance_grid",
+      n_did = 10L, n_rct = 20L,
+      did_gamma_mean = 0.08, did_gamma_sd = 0.02, did_gamma_sign_flip = TRUE,
+      n_randomised_rct = 20L, kappa_true = 0
+    ),
+    compare = X_ARMS
+  ),
+
+  X6 = scenario(
+    "Direction: DiD gamma +/-0.12 (sign-flipped), RCTs truly randomised",
+    dgp = list(
+      type = "bespoke", bespoke_fn = "simulate_imbalance_grid",
+      n_did = 10L, n_rct = 20L,
+      did_gamma_mean = 0.12, did_gamma_sd = 0.02, did_gamma_sign_flip = TRUE,
+      n_randomised_rct = 20L, kappa_true = 0
+    ),
+    compare = X_ARMS
+  ),
+
+  # --- X7-X9: what does a WRONG randomisation label cost? --------------------
+  # Every post-only study is labelled randomised, but a growing fraction really
+  # carry gamma ~ N(0.05, 0.02). This prices the assumption the randomisation
+  # column asks the analyst to make, and shows whether a larger kappa buys back
+  # the robustness. Without this, the feature ships with an unmeasured downside.
+  X7 = scenario(
+    "Mislabelling: 0% of 'randomised' RCTs are actually unrandomised",
+    dgp = list(
+      type = "bespoke", bespoke_fn = "simulate_imbalance_grid",
+      n_did = 10L, n_rct = 20L,
+      rct_gamma_mean = 0.05, rct_gamma_sd = 0.02,
+      n_randomised_rct = 20L, kappa_true = 0, mislabel_rate = 0
+    ),
+    compare = X_KAPPA_ARMS(c(0.5, 1, 2), unanchored = TRUE)
+  ),
+
+  X8 = scenario(
+    "Mislabelling: 25% of 'randomised' RCTs are actually unrandomised",
+    dgp = list(
+      type = "bespoke", bespoke_fn = "simulate_imbalance_grid",
+      n_did = 10L, n_rct = 20L,
+      rct_gamma_mean = 0.05, rct_gamma_sd = 0.02,
+      n_randomised_rct = 20L, kappa_true = 0, mislabel_rate = 0.25
+    ),
+    compare = X_KAPPA_ARMS(c(0.5, 1, 2), unanchored = TRUE)
+  ),
+
+  X9 = scenario(
+    "Mislabelling: 50% of 'randomised' RCTs are actually unrandomised",
+    dgp = list(
+      type = "bespoke", bespoke_fn = "simulate_imbalance_grid",
+      n_did = 10L, n_rct = 20L,
+      rct_gamma_mean = 0.05, rct_gamma_sd = 0.02,
+      n_randomised_rct = 20L, kappa_true = 0, mislabel_rate = 0.5
+    ),
+    compare = X_KAPPA_ARMS(c(0.5, 1, 2), unanchored = TRUE)
+  ),
+
+  # --- X10-X12: the hard-zero trap in a randomised DiD -----------------------
+  # DiD-only, every study randomised, with a realised population imbalance of
+  # kappa_true sampling SDs. kappa = 0 is the HARD constraint gamma == 0: the
+  # model can no longer difference the imbalance away and must average the pre-
+  # and post-period information instead, so a real imbalance should leak into
+  # theta. Larger kappa shrinks toward zero without imposing it; the `shared`
+  # arm leaves gamma free (maximally robust, least precise). The scenarios ask
+  # what precision the robustness costs, and vice versa.
+  X10 = scenario(
+    "Hard-zero trap: randomised DiD, kappa_true = 0 (randomisation held)",
+    dgp = list(
+      type = "bespoke", bespoke_fn = "simulate_imbalance_grid",
+      n_did = 20L, n_rct = 0L, n_randomised_did = 20L, kappa_true = 0
+    ),
+    compare = c(X_KAPPA_ARMS(c(0, 0.5, 1, 2)),
+                list(list(label = "free_gamma", baseline_imbalance = "estimated",
+                          mu_gamma = "zero")))
+  ),
+
+  X11 = scenario(
+    "Hard-zero trap: randomised DiD, kappa_true = 1",
+    dgp = list(
+      type = "bespoke", bespoke_fn = "simulate_imbalance_grid",
+      n_did = 20L, n_rct = 0L, n_randomised_did = 20L, kappa_true = 1
+    ),
+    compare = c(X_KAPPA_ARMS(c(0, 0.5, 1, 2)),
+                list(list(label = "free_gamma", baseline_imbalance = "estimated",
+                          mu_gamma = "zero")))
+  ),
+
+  X12 = scenario(
+    "Hard-zero trap: randomised DiD, kappa_true = 2",
+    dgp = list(
+      type = "bespoke", bespoke_fn = "simulate_imbalance_grid",
+      n_did = 20L, n_rct = 0L, n_randomised_did = 20L, kappa_true = 2
+    ),
+    compare = c(X_KAPPA_ARMS(c(0, 0.5, 1, 2)),
+                list(list(label = "free_gamma", baseline_imbalance = "estimated",
+                          mu_gamma = "zero")))
+  ),
+
+  # --- X13-X15: is kappa identified, and what does a fixed default cost? -----
+  # kappa_true = 1 throughout; only the number of randomised DiD studies (the
+  # sole anchor) changes. X13 has none, so kappa cannot be estimated at all --
+  # it sweeps fixed values instead, and the spread of results across that sweep
+  # IS the sensitivity band that justifies the default. X14/X15 add anchors and
+  # ask how many randomised DiD studies it takes before estimating kappa beats
+  # guessing it.
+  X13 = scenario(
+    "kappa: 0 randomised DiD (no anchor) -- fixed-kappa sensitivity band",
+    dgp = list(
+      type = "bespoke", bespoke_fn = "simulate_imbalance_grid",
+      n_did = 10L, n_rct = 20L, n_randomised_did = 0L,
+      n_randomised_rct = 20L, kappa_true = 1
+    ),
+    compare = X_KAPPA_ARMS(c(0, 0.5, 1, 2))
+  ),
+
+  X14 = scenario(
+    "kappa: 3 randomised DiD anchors -- estimate vs fixed",
+    dgp = list(
+      type = "bespoke", bespoke_fn = "simulate_imbalance_grid",
+      n_did = 10L, n_rct = 20L, n_randomised_did = 3L,
+      n_randomised_rct = 20L, kappa_true = 1
+    ),
+    compare = X_KAPPA_ARMS(c(0.5, 1), estimate = TRUE)
+  ),
+
+  X15 = scenario(
+    "kappa: 10 randomised DiD anchors -- estimate vs fixed",
+    dgp = list(
+      type = "bespoke", bespoke_fn = "simulate_imbalance_grid",
+      n_did = 10L, n_rct = 20L, n_randomised_did = 10L,
+      n_randomised_rct = 20L, kappa_true = 1
+    ),
+    compare = X_KAPPA_ARMS(c(0.5, 1), estimate = TRUE)
+  ),
+
+  # --- X16-X18: cluster randomisation ----------------------------------------
+  # Clustered allocation with m = 51, ICC = 0.02, i.e. a design effect of 2. The
+  # arm means genuinely carry that design effect, so a model using sigma^2/n is
+  # over-precise. X16 supplies m and ICC so the study's own DEFF is used; X17
+  # withholds them and falls back to cluster_deff_default; X18 mislabels the
+  # allocation as individual, understating it entirely.
+  #
+  # Note the DEFF correction reaches the BASELINE CONTRAST only -- the
+  # post-period likelihood still uses sigma^2/n -- so none of these arms should
+  # fully restore calibration. Measuring that shortfall is the point.
+  X16 = scenario(
+    "Cluster: DEFF = 2 from supplied cluster_size and icc",
+    dgp = list(
+      type = "bespoke", bespoke_fn = "simulate_imbalance_grid",
+      n_did = 10L, n_rct = 20L,
+      n_randomised_did = 10L, n_randomised_rct = 20L,
+      kappa_true = 0, cluster_size = 51, icc = 0.02
+    ),
+    compare = X_KAPPA_ARMS(c(0, 0.5, 1))
+  ),
+
+  X17 = scenario(
+    "Cluster: m/ICC withheld, DEFF falls back to cluster_deff_default",
+    dgp = list(
+      type = "bespoke", bespoke_fn = "simulate_imbalance_grid",
+      n_did = 10L, n_rct = 20L,
+      n_randomised_did = 10L, n_randomised_rct = 20L,
+      kappa_true = 0, cluster_size = 51, icc = 0.02
+    ),
+    fit = list(cluster_deff_default = 2),
+    compare = X_KAPPA_ARMS(c(0, 0.5, 1))
+  ),
+
+  X18 = scenario(
+    "Cluster: allocation mislabelled as individual (DEFF ignored)",
+    dgp = list(
+      type = "bespoke", bespoke_fn = "simulate_imbalance_grid",
+      n_did = 10L, n_rct = 20L,
+      n_randomised_did = 10L, n_randomised_rct = 20L,
+      kappa_true = 0, cluster_size = 51, icc = 0.02,
+      randomisation_label_override = "individual"
+    ),
+    compare = X_KAPPA_ARMS(c(0, 0.5, 1))
+  ),
+
+  # --- X19: design offsets and mu_gamma are near-aliased ---------------------
+  # For post-only studies only the SUM delta_rct + mu_gamma is identified;
+  # mu_gamma is pinned solely by the DiD studies. With design_effects on and
+  # mu_gamma estimated the posterior should show a ridge, inflating both
+  # parameters' SDs relative to the mu_gamma = "zero" arm. (The posterior
+  # CORRELATION would show it more directly, but extract_posteriors() returns
+  # marginal summaries only -- see the follow-up note in the branch summary.)
+  X19 = scenario(
+    "Aliasing: design_effects with estimated vs pinned mu_gamma",
+    dgp = list(
+      type = "bespoke", bespoke_fn = "simulate_imbalance_grid",
+      n_did = 10L, n_rct = 20L,
+      did_gamma_mean = 0.05, did_gamma_sd = 0.02
+    ),
+    fit = list(design_effects = TRUE),
+    compare = list(
+      list(label = "mu_gamma_est",  baseline_imbalance = "estimated", mu_gamma = "estimated"),
+      list(label = "mu_gamma_zero", baseline_imbalance = "estimated", mu_gamma = "zero")
+    )
+  ),
+
+  # --- X20: does normalisation overstate how precisely gamma is pinned? ------
+  # Every study is DiD with gamma identically zero, so tau_gamma should
+  # concentrate at 0. Under normalise = TRUE the data are divided by the
+  # OBSERVED mean_pre_control, which the likelihood then treats as exactly 1
+  # with no uncertainty -- dropping the divisor's own sampling variance from the
+  # baseline contrast (roughly a factor of two with balanced arms). If that
+  # matters, tau_gamma should sit above zero under normalisation, shrink as n
+  # grows, and stay near zero in the unnormalised arm.
+  #
+  # tau_gamma is exactly the quantity the two-population model transports to
+  # post-only studies, so this is a prerequisite for trusting the rest of X.
+  X20 = scenario(
+    "Normalisation: gamma == 0, n = 30/arm, normalised vs raw",
+    dgp = list(
+      type = "bespoke", bespoke_fn = "simulate_imbalance_grid",
+      n_did = 20L, n_rct = 0L, n_control = 30L, n_treatment = 30L
+    ),
+    compare = list(
+      list(label = "normalised", normalise = TRUE,  baseline_imbalance = "estimated", mu_gamma = "zero"),
+      list(label = "raw",        normalise = FALSE, baseline_imbalance = "estimated", mu_gamma = "zero")
+    )
+  ),
+
+  X21 = scenario(
+    "Normalisation: gamma == 0, n = 100/arm, normalised vs raw",
+    dgp = list(
+      type = "bespoke", bespoke_fn = "simulate_imbalance_grid",
+      n_did = 20L, n_rct = 0L, n_control = 100L, n_treatment = 100L
+    ),
+    compare = list(
+      list(label = "normalised", normalise = TRUE,  baseline_imbalance = "estimated", mu_gamma = "zero"),
+      list(label = "raw",        normalise = FALSE, baseline_imbalance = "estimated", mu_gamma = "zero")
+    )
+  ),
+
+  X22 = scenario(
+    "Normalisation: gamma == 0, n = 400/arm, normalised vs raw",
+    dgp = list(
+      type = "bespoke", bespoke_fn = "simulate_imbalance_grid",
+      n_did = 20L, n_rct = 0L, n_control = 400L, n_treatment = 400L
+    ),
+    compare = list(
+      list(label = "normalised", normalise = TRUE,  baseline_imbalance = "estimated", mu_gamma = "zero"),
+      list(label = "raw",        normalise = FALSE, baseline_imbalance = "estimated", mu_gamma = "zero")
+    )
+  ),
+
+  # --- X21: individual-level data --------------------------------------------
+  # Mirrors X11. For summary studies s_i is computed in R from the reported SDs
+  # and passed as data; for individual studies the observation SDs are
+  # PARAMETERS, so s_i is built inside Stan and its uncertainty is propagated
+  # rather than plugged in. Without this scenario that branch ships untested.
+  # Runs at the reduced individual-data replication count.
+  # --- X24-X27: do pre-post studies sit on a different scale? ----------------
+  # A PP study has no control arm, so it can only normalise by its own
+  # treatment-arm pre mean. DiD and RCT normalise by the CONTROL baseline. When
+  # the treated group is selected (gamma != 0) those denominators differ:
+  #
+  #   DiD / RCT effect  =  theta / b
+  #   PP effect         =  theta / (b + gamma)  =  (theta / b) / (1 + gamma/b)
+  #
+  # yet all three are pooled into a single mu_theta. At gamma = 0.12 on a
+  # baseline of 0.45 that is a 21% scale difference on every PP study.
+  #
+  # gamma is swept with the PP share held at half, so the gamma = 0 scenario is
+  # a built-in null: any attenuation there is not the mismatch. The `raw` arm is
+  # the second control -- pooling on the absolute scale involves no divisor, so
+  # the mismatch cannot arise, and its slope across gamma should be flat.
+  #
+  # NOTE this is deliberately NOT registered in scenario_expectations(). It is a
+  # real limitation of the package rather than a deliberately-naive comparator,
+  # so it should surface under "Genuine issues" in the report, not be filed away
+  # as expected-by-design.
+  X24 = scenario(
+    "PP scale: gamma = 0 (null -- no mismatch possible), 10 DiD + 10 PP",
+    dgp = list(
+      type = "bespoke", bespoke_fn = "simulate_imbalance_grid",
+      n_did = 10L, n_rct = 0L, n_pp = 10L,
+      did_gamma_mean = 0, did_gamma_sd = 0.02,
+      pp_gamma_mean  = 0, pp_gamma_sd  = 0.02
+    ),
+    compare = list(
+      list(label = "normalised", normalise = TRUE),
+      list(label = "raw",        normalise = FALSE)
+    )
+  ),
+
+  X25 = scenario(
+    "PP scale: gamma = 0.04 (9% denominator gap), 10 DiD + 10 PP",
+    dgp = list(
+      type = "bespoke", bespoke_fn = "simulate_imbalance_grid",
+      n_did = 10L, n_rct = 0L, n_pp = 10L,
+      did_gamma_mean = 0.04, did_gamma_sd = 0.02,
+      pp_gamma_mean  = 0.04, pp_gamma_sd  = 0.02
+    ),
+    compare = list(
+      list(label = "normalised", normalise = TRUE),
+      list(label = "raw",        normalise = FALSE)
+    )
+  ),
+
+  X26 = scenario(
+    "PP scale: gamma = 0.08 (18% denominator gap), 10 DiD + 10 PP",
+    dgp = list(
+      type = "bespoke", bespoke_fn = "simulate_imbalance_grid",
+      n_did = 10L, n_rct = 0L, n_pp = 10L,
+      did_gamma_mean = 0.08, did_gamma_sd = 0.02,
+      pp_gamma_mean  = 0.08, pp_gamma_sd  = 0.02
+    ),
+    compare = list(
+      list(label = "normalised", normalise = TRUE),
+      list(label = "raw",        normalise = FALSE)
+    )
+  ),
+
+  X27 = scenario(
+    "PP scale: gamma = 0.12 (27% denominator gap), 10 DiD + 10 PP",
+    dgp = list(
+      type = "bespoke", bespoke_fn = "simulate_imbalance_grid",
+      n_did = 10L, n_rct = 0L, n_pp = 10L,
+      did_gamma_mean = 0.12, did_gamma_sd = 0.02,
+      pp_gamma_mean  = 0.12, pp_gamma_sd  = 0.02
+    ),
+    compare = list(
+      list(label = "normalised", normalise = TRUE),
+      list(label = "raw",        normalise = FALSE)
+    )
+  ),
+
+  X23 = scenario(
+    "Individual data: randomised DiD, kappa_true = 1 (parameter-valued s_i)",
+    dgp = list(
+      type = "bespoke", bespoke_fn = "simulate_imbalance_grid",
+      n_did = 10L, n_rct = 0L, n_randomised_did = 10L, kappa_true = 1,
+      n_control = 60L, n_treatment = 60L
+    ),
+    fit = list(data_format = "individual"),
+    compare = X_KAPPA_ARMS(c(0, 0.5, 1))
   )
 )
 
@@ -2048,8 +2613,46 @@ scenario_expectations <- function() {
     # studies, so under-coverage here is the demonstrated identification limit.
     "B5", "full",             NA,                     "RCT baseline imbalance not per-study identifiable; full model relies on hierarchical borrowing from few DiD — under-coverage expected",
     "B5", "naive",            NA,                     "Naive arm ignores RCT baseline imbalance — biased by design",
-    "B6", "full",             NA,                     "Shared baseline-difference hierarchy is dominated by the larger DiD imbalance and mis-applies it to RCT — bias expected by design",
+    "B6", "full",             NA,                     "Shared baseline-difference hierarchy is dominated by the larger DiD imbalance and mis-applies it to RCT — bias expected by design (see category X, which isolates this)",
     "B6", "naive",            NA,                     "Naive arm ignores baseline imbalance — biased by design",
+    # --- Category X: randomisation and baseline imbalance -------------------
+    # The `shared` arm IS the finding: one gamma population with an estimated
+    # mean imports the DiD studies' selection-driven imbalance onto genuinely
+    # randomised trials, whose own data cannot contradict it. Bias here is the
+    # result being demonstrated, not a defect.
+    "X1", "shared",           NA,                     "Shared gamma population transports one-sided DiD imbalance onto randomised RCTs — bias is the demonstrated finding",
+    "X2", "shared",           NA,                     "Shared gamma population transports one-sided DiD imbalance onto randomised RCTs — bias is the demonstrated finding",
+    "X3", "shared",           NA,                     "Shared gamma population transports one-sided DiD imbalance onto randomised RCTs — bias is the demonstrated finding",
+    # fixed_zero happens to be correct in X1-X6 (the RCTs really are randomised
+    # with gamma == 0), so it is deliberately NOT registered: if it deviates
+    # there, that is worth seeing.
+    #
+    # Mislabelling: the randomisation claim is false by construction, so every
+    # arm is misspecified. X7 has a zero mislabel rate and is not registered.
+    "X8", NA,                 NA,                     "A quarter of studies labelled randomised are not — every arm misspecified by design; the question is how much kappa buys back",
+    "X9", NA,                 NA,                     "Half of studies labelled randomised are not — every arm misspecified by design",
+    # Hard-zero trap: kappa = 0 pins gamma at zero, so a real imbalance cannot
+    # be differenced away and leaks into theta. That leak is the point.
+    "X11", "kappa_0",         NA,                     "kappa = 0 imposes gamma == 0 against a real imbalance — the hard-zero trap being demonstrated",
+    "X12", "kappa_0",         NA,                     "kappa = 0 imposes gamma == 0 against a larger real imbalance — the hard-zero trap being demonstrated",
+    "X13", "kappa_0",         NA,                     "kappa fixed at 0 while kappa_true = 1 — the low end of the sensitivity band, misspecified by design",
+    "X23", "kappa_0",         NA,                     "kappa = 0 imposes gamma == 0 against a real imbalance (individual data) — the hard-zero trap being demonstrated",
+    # Cluster randomisation: the design effect is applied to the BASELINE
+    # CONTRAST only. The post-treatment likelihood still uses sigma^2/n, so
+    # every cluster arm stays over-precise. Measuring that shortfall is the
+    # purpose of these scenarios.
+    "X16", NA,                NA,                     "Cluster DEFF corrects the baseline contrast only; post-period likelihood still uses sigma^2/n — residual over-precision expected",
+    "X17", NA,                NA,                     "As X16, with DEFF taken from cluster_deff_default rather than reported m/ICC",
+    "X18", NA,                NA,                     "Cluster allocation deliberately mislabelled as individual — DEFF ignored entirely, misspecified by design",
+    # delta_rct and mu_gamma are near-aliased for post-only studies: only their
+    # sum is identified. The ridge is what X19 exists to show.
+    "X19", "mu_gamma_est",    NA,                     "delta_rct and mu_gamma are near-aliased for post-only studies — the ridge is the demonstrated finding",
+    # Normalisation divisor: dividing by the OBSERVED control baseline drops
+    # that divisor's sampling variance from the baseline contrast, which is
+    # expected to inflate tau_gamma. These scenarios measure the size of it.
+    "X20", "normalised",      "baseline_difference_sd", "Normalisation treats the observed control baseline as exact, dropping its sampling variance from the baseline contrast — tau_gamma inflation is what this scenario measures",
+    "X21", "normalised",      "baseline_difference_sd", "As X20 at n = 100/arm",
+    "X22", "normalised",      "baseline_difference_sd", "As X20 at n = 400/arm",
     "H1", "naive",            NA,                     "Naive arm — misspecified by design",
     "H2", "naive",            NA,                     "Naive arm — misspecified by design",
     "H3", "naive",            NA,                     "Naive arm — misspecified by design",
@@ -2192,7 +2795,10 @@ scenario_summary_table <- function(category) {
   # Category I scenarios manage their own modelled/raw and with/without
   # comparators via per-scenario `compare` blocks, so no programmatic
   # cross-cutting comparators are added.
-  I = character()
+  I = character(),
+  # Category X likewise defines its own gamma arms (X_ARMS / X_KAPPA_ARMS);
+  # a "naive" comparator would duplicate the fixed_zero arm.
+  X = character()
 )
 
 # Coerce one config value (which may be NULL, a formula, a data.frame, a
