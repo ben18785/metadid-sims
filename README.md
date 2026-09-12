@@ -200,3 +200,9 @@ hand after changing the pipeline's plumbing.
    `_targets.R` and an entry in `all_agg` / `all_rep`
 3. For bespoke DGPs, add the simulation function to `R/simulate.R` and reference it via `bespoke_fn`
 4. Run `tar_make()` — only new/changed targets will execute
+
+## Acknowledgements
+
+Parts of this simulation study were developed with assistance from
+[Claude Code](https://claude.com/claude-code) (Anthropic), used as a tool under
+the direction and review of the authors.

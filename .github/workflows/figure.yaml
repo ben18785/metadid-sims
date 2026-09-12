@@ -15,7 +15,7 @@ on:
       reps:
         description: "Replications per figure scenario (N_REPS_FIG)"
         type: number
-        default: 5
+        default: 15
 
 concurrency:
   group: paper-figure
