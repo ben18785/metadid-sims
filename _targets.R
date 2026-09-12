@@ -51,11 +51,24 @@ N_REPS <- 25L
 # downstream targets are unchanged.
 N_REPS_INDIV <- 15L
 
-# Figure-sweep categories (J-P) run at a deliberately small replication
-# count while the paper figure design settles. Overridable via the
-# N_REPS_FIG environment variable (used by the figure.yaml workflow's
-# reps input); raise for the final run.
-N_REPS_FIG <- as.integer(Sys.getenv("N_REPS_FIG", "5"))
+# Figure-sweep categories (J-P) and category X run at a reduced replication
+# count relative to the N_REPS validation categories. Overridable via the
+# N_REPS_FIG environment variable (used by the figure.yaml workflow's reps
+# input); sims.yaml does not set it, so the archived daily runs use this
+# default.
+#
+# Raised from 5 to 15 after the 2026-09-11 run. At 5 reps the bias columns
+# were usable -- the transport result in X1-X3 was clear, with |t| of 3-6 --
+# but empirical coverage carries a Monte Carlo SE of about 0.22, so 0.60 and
+# 0.80 were indistinguishable and no coverage claim could be made at all. 15
+# brings that SE to roughly 0.13, enough to separate gross miscalibration from
+# noise. It is still not enough to quote a coverage figure precisely; the
+# N_REPS = 25 categories remain the ones to cite for calibration.
+#
+# Cost: triples the runner time for J-P and X. Safe against the job timeout
+# because sims.yaml matrixes one job PER SCENARIO (360 min each), so tripling
+# the reps triples a per-scenario time that is currently well inside it.
+N_REPS_FIG <- as.integer(Sys.getenv("N_REPS_FIG", "15"))
 
 # Category M feeds panel F, which plots an RMSE RATIO -- a second-moment
 # statistic whose Monte Carlo error is ~1/sqrt(2n): about 32% at 5 reps,
