@@ -89,14 +89,12 @@ jobs:
           extra-repositories: "https://mc-stan.org/r-packages/"
 
       # tarchetypes::tar_quarto() in _targets.R probes the Quarto CLI at
-      # pipeline-construction time, so tar_make() needs the binary even
-      # though this workflow never renders the report.
-      #
-      # No setup-pandoc here on purpose: nothing in this workflow renders a
-      # document (render_paper_figures() only calls ggsave), and Quarto ships
-      # its own pandoc. Downloading it separately added two network calls per
-      # job with nothing depending on the result -- and it 503'd.
-      - uses: quarto-dev/quarto-actions/setup@v2
+      # No Quarto and no pandoc here. This workflow renders nothing --
+      # render_paper_figures() only calls ggsave -- and _targets.R now defines
+      # the report target conditionally, so tar_make() no longer needs the CLI
+      # merely to CONSTRUCT the pipeline. Both were pure network risk: pandoc
+      # 503'd once, and a Quarto .deb download failed SSL on a C4 simulation
+      # job in sims.yaml, losing a job to a dependency it had no use for.
 
       - name: Install R package dependencies
         uses: r-lib/actions/setup-r-dependencies@v2
@@ -189,8 +187,6 @@ jobs:
         with:
           use-public-rspm: true
           extra-repositories: "https://mc-stan.org/r-packages/"
-
-      - uses: quarto-dev/quarto-actions/setup@v2
 
       - name: Install R package dependencies
         uses: r-lib/actions/setup-r-dependencies@v2

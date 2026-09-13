@@ -117,6 +117,35 @@ scenario_values <- function(ids) {
 # Pipeline definition
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Validation report target
+# ---------------------------------------------------------------------------
+#
+# tarchetypes::tar_quarto() probes the qmd through the Quarto CLI when the
+# PIPELINE IS CONSTRUCTED, not when the target is built. That made the CLI a
+# hard dependency of every tar_make() call: each of the ~60 per-scenario jobs
+# in sims.yaml installed Quarto solely to satisfy a probe for a report it
+# never renders, and a flaky download there killed a simulation job outright
+# (a C4 run died on "Unable to establish SSL connection" fetching the .deb).
+# It also meant tar_make() could not run at all on a machine without Quarto,
+# which is most laptops.
+#
+# So: define the real Quarto target only when the CLI is present, and
+# otherwise define a target of the SAME NAME that fails with an explanation.
+# Omitting it entirely would turn a missing dependency into "target not
+# found", which is a worse error than the one it replaces.
+.report_target <- if (nzchar(Sys.which("quarto"))) {
+  tarchetypes::tar_quarto(report, path = "reports/validation-report.qmd")
+} else {
+  tar_target(
+    report,
+    stop("The validation report needs the Quarto CLI, which is not on PATH. ",
+         "Install it (https://quarto.org/docs/get-started/) and re-run. ",
+         "Every other target builds without it.",
+         call. = FALSE)
+  )
+}
+
 list(
   # ---- Track metadid source: invalidates all downstream targets on reinstall ----
   tar_target(
@@ -779,8 +808,7 @@ list(
   ),
 
   # ---- Validation report ----
-  tarchetypes::tar_quarto(
-    report,
-    path = "reports/validation-report.qmd"
-  )
+  # Defined above as .report_target, because tar_quarto() probes the qmd via
+  # the Quarto CLI at pipeline-CONSTRUCTION time -- see the note there.
+  .report_target
 )

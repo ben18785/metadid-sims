@@ -160,10 +160,15 @@ jobs:
 
       - uses: r-lib/actions/setup-pandoc@v2
 
-      # tarchetypes::tar_quarto() in _targets.R probes the qmd via the Quarto
-      # CLI at pipeline-construction time, so every job that calls tar_make()
-      # needs the binary on PATH — not just the one that renders the report.
-      - uses: quarto-dev/quarto-actions/setup@v2
+      # No Quarto here. The `simulate` jobs render nothing; they used to install
+      # it only because tarchetypes::tar_quarto() probed the qmd at
+      # pipeline-CONSTRUCTION time, making the CLI a hard dependency of every
+      # tar_make() call. _targets.R now defines the report target conditionally,
+      # so the ~60 per-scenario jobs no longer carry a renderer they never use.
+      #
+      # This was not hypothetical: a C4 run died at "Unable to establish SSL
+      # connection" fetching the Quarto .deb, losing a simulation job to a
+      # dependency it had no use for. The report job below still installs it.
 
       # Single source of truth for R dependencies: metadid-sims/DESCRIPTION.
       # Adding a `library()` or `pkg::` call in the repo is now automatically
