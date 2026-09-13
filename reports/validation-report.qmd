@@ -38,29 +38,82 @@ scenario_lookup_tbl <- scenario_lookup()
 ## Executive Summary
 
 ```{r exec-summary}
-# Flag deviations on the primary estimand (treatment_effect_mean), then split
-# them into GENUINE issues vs deviations that are EXPECTED by design
-# (misspecification demos, boundary/degenerate setups, normalisation stress
-# tests). See scenario_expectations() in R/scenarios.R for the registry.
-mean_agg <- all_agg |> filter(parameter == "treatment_effect_mean")
+# Two kinds of scenario need two kinds of test.
+#
+# VALIDATION categories (A-I, X) ask whether the model is calibrated, so
+# "coverage below 80%" is a meaningful failure.
+#
+# FIGURE SWEEPS (J-P) exist to locate where the model breaks so the paper can
+# plot it. A sweep that never lost coverage would be a badly designed sweep, so
+# a coverage floor scores their success as failure. They are excluded from the
+# defect count here and remain in the full results table below.
+#
+# Category X is additionally COMPARATIVE: several of its arms exist to be shown
+# failing, so per-arm coverage tests a claim those scenarios never make. What
+# they do claim is an ordering, checked separately by check_contrasts().
+mean_agg <- all_agg |>
+  filter(parameter == "treatment_effect_mean") |>
+  mutate(category = substr(scenario_id, 1L, 1L))
+
+sweeps <- mean_agg |> filter(category %in% FIGURE_SWEEP_CATEGORIES)
 
 flagged <- bind_rows(
-  mean_agg |> filter(empirical_coverage < 0.80) |>
+  mean_agg |> filter(category %in% VALIDATION_CATEGORIES,
+                     !category %in% "X",
+                     empirical_coverage < 0.80) |>
     mutate(issue = "coverage < 80%"),
-  mean_agg |> filter(pct_rhat_bad > 0.10) |>
+  mean_agg |> filter(category %in% VALIDATION_CATEGORIES,
+                     pct_rhat_bad > 0.10) |>
     mutate(issue = ">10% of fits Rhat > 1.05")
 ) |>
   tag_expectations() |>
   left_join(scenario_lookup(), by = "scenario_id")
 
-genuine  <- flagged |> filter(!expected)
-expected <- flagged |> filter(expected)
+genuine   <- flagged |> filter(!expected)
+expected  <- flagged |> filter(expected)
+contrasts <- check_contrasts(all_agg)
+open_issues <- known_open_issues()
 ```
 
-**`r nrow(all_agg |> distinct(scenario_id))`** scenarios evaluated across
+**`r nrow(all_agg |> distinct(scenario_id))`** scenarios evaluated, at up to
 **`r max(all_agg$n_reps, na.rm = TRUE)`** replications each.
+Of these, **`r nrow(sweeps |> distinct(scenario_id))`** are figure sweeps (J-P),
+excluded from the counts below and reported for the paper panels instead.
 
-`r if (nrow(genuine) == 0) "**No genuine issues:** every deviation on the treatment-effect mean is expected by design (see below)." else paste0("**", nrow(genuine), " genuine issue(s)** on the treatment-effect mean need attention (below). A further ", nrow(expected), " flagged result(s) are expected by design.")`
+`r if (nrow(genuine) == 0) "**No genuine calibration issues:** every flagged deviation on the treatment-effect mean is expected by design (see below)." else paste0("**", nrow(genuine), " genuine calibration issue(s)** on the treatment-effect mean need attention (below). A further ", nrow(expected), " flagged result(s) are expected by design.")`
+
+**Category X contrasts:** `r sum(contrasts$holds, na.rm = TRUE)` of
+`r nrow(contrasts)` directional claims hold.
+`r if (all(contrasts$holds, na.rm = TRUE)) "Every comparative scenario ordered its arms as predicted." else "Some orderings came out against prediction -- see the table below."`
+
+### Known open issues
+
+These are real, stated, and unfixed. They are listed once here rather than as
+dozens of per-arm flags (which buries them) or registered as expected-by-design
+(which hides them).
+
+```{r open-issues}
+#| eval: !expr nrow(open_issues) > 0
+open_issues |>
+  select(Issue = id, Affects = affects, Detail = summary) |>
+  kable()
+```
+
+### Category X: do the comparative scenarios order their arms as claimed?
+
+Each row is a claim a scenario makes -- that the arm named `better` gets closer
+to the truth than the arm named `worse`. This replaces per-arm coverage flags
+for category X, because several of its arms exist to be shown failing.
+
+```{r contrast-table}
+contrasts |>
+  mutate(across(c(better_rmse, worse_rmse), \(x) round(x, 4)),
+         holds = ifelse(holds, "yes", "NO")) |>
+  select(Scenario = scenario_id, Claim = claim,
+         Better = better, `RMSE` = better_rmse,
+         Worse = worse, `RMSE ` = worse_rmse, Holds = holds) |>
+  kable()
+```
 
 ### Genuine issues
 
