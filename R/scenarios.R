@@ -2613,6 +2613,7 @@ scenario_expectations <- function() {
     # studies, so under-coverage here is the demonstrated identification limit.
     "B5", "full",             NA,                     "RCT baseline imbalance not per-study identifiable; full model relies on hierarchical borrowing from few DiD — under-coverage expected",
     "B5", "naive",            NA,                     "Naive arm ignores RCT baseline imbalance — biased by design",
+    "B5", "zero_mean",        NA,                     "Same identification limit as the full arm: post-only imbalance is not per-study identifiable, and pinning mu_gamma does not create information that is not there. All three arms under-cover comparably (0.12 / 0.04 / 0.08)",
     "B6", "full",             NA,                     "Shared baseline-difference hierarchy is dominated by the larger DiD imbalance and mis-applies it to RCT — bias expected by design (see category X, which isolates this)",
     "B6", "naive",            NA,                     "Naive arm ignores baseline imbalance — biased by design",
     # --- Category X: randomisation and baseline imbalance -------------------
@@ -2722,6 +2723,132 @@ scenario_expectations <- function() {
 # Annotate a data frame of flagged results (must contain scenario_id,
 # model_label, parameter) with `expected` (logical) and `reason` (chr),
 # resolved against scenario_expectations() with NA-as-wildcard matching.
+# ---------------------------------------------------------------------------
+# Which categories the Executive Summary judges
+# ---------------------------------------------------------------------------
+
+# A-I and X are VALIDATION categories: they ask whether the model is
+# calibrated, so "coverage below 80%" is a meaningful failure.
+#
+# J-P are FIGURE SWEEPS. They exist to locate where the model breaks so the
+# paper can plot it, and they are built by figure.yaml rather than the daily
+# pipeline. A sweep that never lost coverage would be a badly designed sweep,
+# so scoring them against a coverage floor counts success as failure. They
+# stay in aggregated_results.csv and the full results table; they are simply
+# not part of the defect count.
+VALIDATION_CATEGORIES <- c("A", "B", "C", "D", "E", "F", "G", "H", "I", "X")
+
+# J-P are built by the daily pipeline and so appear in aggregated_results.csv;
+# Q-W are built only by figure.yaml and do not. Both are sweeps and neither
+# belongs in the defect count, so both are listed -- the partition test in
+# tests/testthat/test-report-scoping.R asserts these two vectors together
+# cover every category in SCENARIO_CONFIGS, which is what caught Q-W being
+# omitted here in the first place.
+FIGURE_SWEEP_CATEGORIES <- c("J", "K", "L", "M", "N", "O", "P",
+                             "Q", "R", "S", "T", "U", "V", "W")
+
+# ---------------------------------------------------------------------------
+# Directional contrasts: what a comparative scenario actually claims
+# ---------------------------------------------------------------------------
+
+# Category X is comparative. Its scenarios do not claim "every arm is well
+# calibrated" -- several exist precisely to show an arm failing, and flagging
+# those arms tests a claim the scenario never made. What each one DOES claim
+# is an ORDERING: that the arm we recommend beats the arm we argue against.
+#
+# Each row is one such claim, checked by check_contrasts(). Scenarios absent
+# from this table make no ordering claim; they are characterisation runs
+# (how large is the cost, is kappa identified) and are reported without a
+# pass/fail verdict.
+scenario_contrasts <- function() {
+  tibble::tribble(
+    ~scenario_id, ~parameter,                ~better,         ~worse,         ~claim,
+    # Transport: a shared gamma population imports the DiD studies' selection
+    # onto genuinely randomised trials. Pinning mu_gamma at zero should win.
+    "X1",  "treatment_effect_mean",    "zero_mean",     "shared",
+      "zero-mean gamma beats a shared population when the RCTs really are randomised",
+    "X2",  "treatment_effect_mean",    "zero_mean",     "shared",
+      "as X1, at a larger DiD imbalance",
+    "X3",  "treatment_effect_mean",    "zero_mean",     "shared",
+      "as X1, at a larger DiD imbalance still",
+    # delta_rct and mu_gamma are near-aliased for post-only studies.
+    "X19", "treatment_effect_mean",    "mu_gamma_zero", "mu_gamma_est",
+      "pinning mu_gamma avoids the delta_rct ridge",
+    # B6 predates category X and runs at N_REPS = 25, so it is the strongest
+    # single piece of evidence for the transport claim: DiD imbalance larger
+    # than post-only imbalance, which is exactly when borrowing mu_gamma hurts.
+    "B6", "treatment_effect_mean",    "zero_mean",     "full",
+      "zero-mean gamma beats a shared population when DiD imbalance exceeds post-only imbalance (n = 25)",
+    # Normalisation divides by the OBSERVED control baseline and then treats it
+    # as exact, which should inflate tau_gamma relative to the raw scale.
+    "X20", "baseline_difference_sd",   "raw",           "normalised",
+      "normalisation inflates tau_gamma (n = 30/arm)",
+    "X21", "baseline_difference_sd",   "raw",           "normalised",
+      "normalisation inflates tau_gamma (n = 100/arm)",
+    "X22", "baseline_difference_sd",   "raw",           "normalised",
+      "normalisation inflates tau_gamma (n = 400/arm)",
+    # Pre-post studies normalise by their own treatment-arm baseline, so a
+    # one-sided gamma puts them on a different scale from DiD and RCT.
+    "X25", "treatment_effect_mean",    "raw",           "normalised",
+      "PP scale mismatch attenuates the normalised estimate (gamma = 0.04)",
+    "X26", "treatment_effect_mean",    "raw",           "normalised",
+      "PP scale mismatch attenuates the normalised estimate (gamma = 0.08)",
+    "X27", "treatment_effect_mean",    "raw",           "normalised",
+      "PP scale mismatch attenuates the normalised estimate (gamma = 0.12)"
+  )
+}
+
+#' Evaluate the directional contrasts against an aggregated results table
+#'
+#' Returns one row per claim with the two arms' RMSE and a pass/fail. A claim
+#' passes when the arm it names as better has RMSE no worse than the other.
+#' RMSE rather than coverage: these scenarios are about which arm gets closer
+#' to the truth, and at the replication counts the sweeps run at, coverage is
+#' too noisy to order two arms reliably.
+check_contrasts <- function(agg) {
+  reg <- scenario_contrasts()
+  purrr::pmap_dfr(
+    list(reg$scenario_id, reg$parameter, reg$better, reg$worse, reg$claim),
+    function(sid, par, better, worse, claim) {
+      rs <- agg[agg$scenario_id == sid & agg$parameter == par, ]
+      b <- rs$rmse[rs$model_label == better]
+      w <- rs$rmse[rs$model_label == worse]
+      tibble::tibble(
+        scenario_id = sid, parameter = par, claim = claim,
+        better = better, better_rmse = if (length(b)) b[[1]] else NA_real_,
+        worse  = worse,  worse_rmse  = if (length(w)) w[[1]] else NA_real_,
+        holds  = if (length(b) && length(w)) b[[1]] <= w[[1]] else NA
+      )
+    }
+  )
+}
+
+# ---------------------------------------------------------------------------
+# Standing open issues
+# ---------------------------------------------------------------------------
+
+# Findings that are real, understood well enough to state, and not yet fixed.
+# Listed once here rather than surfacing as dozens of per-arm flags (which
+# buries them) or being registered as expected-by-design (which hides them).
+known_open_issues <- function() {
+  tibble::tribble(
+    ~id, ~affects, ~summary,
+    "post-only-residual-bias",
+    "X1-X9, X13-X18 (any composition dominated by post-only studies)",
+    paste(
+      "Every arm carries a positive bias of roughly +0.02 on a true effect of",
+      "-0.337 (about 7%) whenever post-only studies dominate the evidence base,",
+      "including arms whose post-only studies have gamma identically zero. It is",
+      "absent from DiD-only scenarios (X10-X12, |t| <= 1) and from category A",
+      "(bias ~0.003, coverage 0.84-0.96), so it is not the transport mechanism",
+      "and not a general miscalibration. Leading suspicion is the post-only",
+      "normalisation denominator: RCTs divide by mean_post_control (b + beta)",
+      "while DiD divide by mean_pre_control (b), making this the time-trend",
+      "analogue of the pre-post scale mismatch in X24-X27. Not investigated."
+    )
+  )
+}
+
 tag_expectations <- function(flagged) {
   reg <- scenario_expectations()
   hits <- purrr::pmap(
