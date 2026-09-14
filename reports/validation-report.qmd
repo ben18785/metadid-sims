@@ -29,6 +29,7 @@ library(kableExtra)
 
 tar_source("R/scenarios.R")
 tar_source("R/plots.R")
+tar_source("R/archive.R")
 
 all_agg <- tar_read(all_agg)
 all_rep <- tar_read(all_rep)
@@ -406,6 +407,92 @@ plot_diagnostics(all_rep, all_agg, scenario_lookup_tbl, "X")
 
 ```{r x-table}
 results_table(all_agg, scenario_lookup_tbl, "X")
+```
+
+## Performance Over Time
+
+`archive.csv` accumulates one row per (scenario, model, parameter) per run,
+stamped with the run date and the installed metadid. This section reads it if
+it is there.
+
+**Everything here is best-effort.** The archive is restored from `gh-pages` by
+a fetch that is allowed to miss, and it can be absent, truncated or too short
+to trend. Every block below degrades to a note rather than failing the report:
+a run costs hours of MCMC, and a history panel must never take one down.
+
+One thing to understand before reading the trends. `targets` caches fits, so a
+scenario is only re-run when something it depends on changes. Two runs on the
+same metadid with unchanged simulation code therefore produce **bit-identical**
+metrics, not merely similar ones. Consecutive-run differences of exactly zero
+are the expected state, and the signal appears where a target was actually
+rebuilt — which is why the dashed rules marking a change of installed metadid
+matter more than the spacing of the runs.
+
+That also means run-to-run spread is no guide to what counts as a real change:
+median absolute deviation is often zero, and dividing by it turns a
+fourth-decimal wobble into a z-score of several hundred. Series below are
+flagged only when they are BOTH unusual against their own history AND
+materially changed — for bias, measured against the estimator's own RMSE
+rather than against bias itself, which sits near zero.
+
+```{r perf-over-time}
+#| fig-height: 8
+archive <- tryCatch(load_archive("output/archive.csv"), error = function(e) NULL)
+common  <- tryCatch(archive_common_series(archive), error = function(e) NULL)
+
+if (is.null(common)) {
+  cat("No usable archive found (missing, unreadable, or fewer than two",
+      "comparable runs). Skipping the history section.\n")
+} else {
+  cat(sprintf("%d runs, %d series with a comparable history.\n",
+              dplyr::n_distinct(common$run_date),
+              dplyr::n_distinct(paste(common$scenario_id, common$model_label,
+                                      common$parameter))))
+  g <- tryCatch(plot_performance_trend(common, metric = "rmse"),
+                error = function(e) NULL)
+  if (is.null(g)) cat("Trend plot unavailable.\n") else print(g)
+}
+```
+
+### Changes since the previous runs
+
+Only the scenario set present across most runs is compared, because the
+number of scenarios grew from 64 to 160 over the archived period and any
+aggregate would otherwise move with composition rather than performance.
+
+```{r perf-regressions}
+changes <- tryCatch({
+  if (is.null(common)) NULL else dplyr::bind_rows(
+    detect_regressions(common, metric = "rmse") |>
+      dplyr::mutate(metric = "rmse"),
+    detect_regressions(common, metric = "mean_bias",
+                       scale_metric = "rmse") |>
+      dplyr::mutate(metric = "mean_bias (vs rmse)"),
+    detect_regressions(common, metric = "empirical_coverage") |>
+      dplyr::mutate(metric = "coverage")
+  )
+}, error = function(e) NULL)
+
+if (is.null(changes)) {
+  cat("Change detection unavailable.\n")
+} else if (nrow(changes) == 0) {
+  cat("No series moved materially since the previous runs.\n")
+} else {
+  changes |>
+    dplyr::arrange(dplyr::desc(abs(rel_change))) |>
+    dplyr::transmute(
+      Metric = metric, Scenario = scenario_id, Model = model_label,
+      Parameter = parameter,
+      Latest = round(current, 4), Baseline = round(baseline, 4),
+      `Rel. change` = sprintf("%+.1f%%", 100 * rel_change)
+    ) |>
+    head(40) |>
+    kable(caption = paste("Series that moved materially in the latest run.",
+                          "A change detector, not a trend estimator:",
+                          "with a handful of irregularly spaced runs it can",
+                          "catch a step change from a code change, and should",
+                          "not be read as evidence of gradual drift."))
+}
 ```
 
 ## Convergence Diagnostics

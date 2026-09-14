@@ -1531,4 +1531,3 @@ plot_figure_si_tolerance <- function(all_agg,
     ggplot2::theme(panel.grid = ggplot2::element_blank(),
                    strip.text = ggplot2::element_text(size = 8))
 }
-

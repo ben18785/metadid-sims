@@ -15,7 +15,9 @@ suppressMessages({
 
 for (.f in list.files(file.path(.sims_root, "R"), pattern = "[.]R$", full.names = TRUE)) {
   # plots.R pulls in ggplot2 and friends but nothing here tests plotting;
-  # skip it so the suite stays fast and dependency-light.
+  # skip it so the suite stays fast and dependency-light. R/archive.R is
+  # deliberately separate from it for exactly that reason -- its functions
+  # guard the pipeline against a malformed archive and must be tested.
   if (basename(.f) == "plots.R") next
   suppressMessages(source(.f))
 }
