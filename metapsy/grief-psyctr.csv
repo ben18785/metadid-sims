@@ -1,0 +1,37 @@
+study_id,Study_Reference,Intervention_ID,Indicator,design,randomisation,randomisation_source,Covariate_cbt,Covariate_dpm,Covariate_other_psy,Covariate_writ,n_control,mean_pre_control,mean_post_control,sd_pre_control,sd_post_control,n_treatment,mean_pre_treatment,mean_post_treatment,sd_pre_treatment,sd_post_treatment,mean_change_control,sd_change_control,mean_change_treatment,sd_change_treatment,n_pre_control,n_post_control,n_pre_treatment,n_post_treatment
+1,Andrade et al. (2016),1,IES,rct,individual,per_arm_count,0,0,1,0,18,,35.22,,16.03,11,,32.18,,15.82,,,,,,18,,11
+2,Barbosa et al. (2014),2,ICG,rct,individual,per_arm_count,1,0,0,0,20,,39.8,,5.31,19,,25.32,,6.46,,,,,,20,,19
+3,Buck et al. (2020),3,ICG,rct,individual,per_arm_count,0,0,1,0,22,,36.3,,10.8,32,,17.1,,9.1,,,,,,22,,32
+4,Dominick et al. (2009),4,Other,rct,individual,per_arm_count,0,0,1,0,34,,4.17,,0.84,33,,4.4,,0.81,,,,,,34,,33
+5,Eisma et al. (2015),5,ICG,rct,individual,per_arm_count,1,0,0,0,10,,59.9,,24.0,15,,50.7,,18.6,,,,,,10,,15
+5,Eisma et al. (2015),6,ICG,rct,individual,per_arm_count,1,0,0,0,10,,59.9,,24.0,11,,57.0,,17.5,,,,,,10,,11
+6,García et al. (2014),7,TRIG,rct,individual,per_arm_count,0,0,1,0,44,,36.84,,9.56,43,,33.24,,10.19,,,,,,44,,43
+7,Goodkin et al. (1999),8,TRIG,rct,,,0,0,1,0,74,,26.37,,12.41,92,,25.61,,11.1,,,,,,74,,92
+8,Groot et al. (2007),9,ITG,rct,individual,per_arm_count,1,0,0,0,54,,66.5,,23.8,68,,69.9,,23.1,,,,,,54,,68
+9,Johansen et al. (2022),10,PG-13,rct,individual,per_arm_count,0,0,1,0,34,,29.63,,7.67,27,,29.41,,6.98,,,,,,34,,27
+10,Kaiser et al. (2022),11,ICG,rct,individual,per_arm_count,0,0,0,1,42,,36.0,,10.8,39,,27.5,,10.4,,,,,,42,,39
+11,Kalantari et al. (2012),12,TGI,rct,,,0,0,0,1,32,,53.9,,14.2,29,,44.9,,12.6,,,,,,32,,29
+12,Kovac & Lilian (2000).,13,GRQ,rct,individual,per_arm_count,0,0,0,1,21,,36.33,,13.82,19,,32.8,,16.56,,,,,,21,,19
+13,Lenferink et al. (2020),14,TGI,rct,individual,per_arm_count,0,0,1,0,17,,41.06,,6.98,18,,40.33,,11.15,,,,,,17,,18
+14,Lenferink et al. (2023),15,TGI,rct,individual,per_arm_count,1,0,0,0,17,,36.71,,5.53,11,,28.73,,5.04,,,,,,17,,11
+15,Lichtenthal & Cruess (2010),16,ICG,rct,individual,per_arm_count,0,0,0,1,36,,29.6,,10.7,39,,27.9,,9.4,,,,,,36,,39
+15,Lichtenthal & Cruess (2010),17,ICG,rct,individual,per_arm_count,0,0,0,1,36,,29.6,,10.7,31,,28.1,,10.5,,,,,,36,,31
+15,Lichtenthal & Cruess (2010),18,ICG,rct,individual,per_arm_count,0,0,0,1,36,,29.6,,10.7,33,,28.6,,8.1,,,,,,36,,33
+16,Litz et al. (2014),19,PG-13,rct,individual,per_arm_count,1,0,0,0,42,,32.84,,9.11,32,,24.7,,8.33,,,,,,42,,32
+17,Mawson et al. (1981),20,TRIG,rct,individual,per_arm_count,1,0,0,0,6,,19.6,,3.92,6,,14.3,,4.16,,,,,,6,,6
+19,Mutedzi et al.  (2023),21,TRIG,rct,individual,per_arm_count,0,1,0,0,86,,20.09,,9.71,57,,17.85,,8.22,,,,,,86,,57
+20,O'Connor et al. (2003),22,CBI,rct,individual,per_arm_count,0,0,0,1,20,,39.35,,8.7,25,,41.32,,11.33,,,,,,20,,25
+21,Park & Cha (2023),23,TRIG,rct,individual,per_arm_count,0,0,1,0,14,,35.0,,13.7,18,,35.7,,8.76,,,,,,14,,18
+22,Range et al. (2000),24,GRQ,rct,individual,per_arm_count,0,0,0,1,24,,29.35,,16.84,20,,35.4,,13.2,,,,,,24,,20
+23,Reitsma et al. (2023),25,TGI,rct,individual,per_arm_count,1,0,0,0,33,,45.08,,11.2,32,,40.09,,9.92,,,,,,33,,32
+24,Rosner et al. (2014),26,PG-13,rct,individual,per_arm_count,1,0,0,0,27,,42.07,,6.58,24,,30.71,,10.19,,,,,,27,,24
+25,Sandler et al. (2010),27,TRIG,rct,individual,per_arm_count,0,0,1,0,106,,3.49,,0.85,132,,3.53,,0.89,,,,,,106,,132
+27,"Sikkema et al. (2004, 2006)",28,GRI,rct,individual,per_arm_count,1,0,0,0,96,,18.07,,11.85,138,,14.64,,9.26,,,,,,96,,138
+28,Supiano & Luptak (2013),29,PG-13,rct,individual,per_arm_count,0,0,1,0,18,,30.14,,7.93,16,,29.33,,10.99,,,,,,18,,16
+29,Thurman et al.  (2017),30,ICG,rct,individual,per_arm_count,1,0,0,0,189,,13.4,,6.5,193,,12.3,,6.3,,,,,,189,,193
+30,Treml et al. (2021),31,ICG,rct,individual,per_arm_count,0,0,0,1,28,,36.72,,11.29,30,,24.79,,11.47,,,,,,28,,30
+31,Unterhitzenberger & Rosner (2014),32,PGQ-A,rct,individual,per_arm_count,0,0,0,1,23,,60.3,,30.1,23,,87.6,,32.6,,,,,,23,,23
+32,Van der Houwen et al. (2010),33,Other,rct,individual,per_arm_count,0,0,0,1,254,,23.5,,8.7,201,,21.5,,8.3,,,,,,254,,201
+33,"Wagner et al. (2006, 2007)",34,IES,rct,individual,per_arm_count,0,0,0,1,25,,19.25,,9.28,26,,9.45,,7.57,,,,,,25,,26
+34,Wagner et al. (2022),35,ICG,rct,individual,per_arm_count,1,0,0,0,56,,27.46,,12.09,84,,27.48,,10.11,,,,,,56,,84
+35,Wittouck et al. (2014),36,ITG,rct,individual,per_arm_count,0,0,1,0,31,,74.0,,24.6,39,,72.1,,22.7,,,,,,31,,39

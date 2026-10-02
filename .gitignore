@@ -9,3 +9,8 @@ reports/validation-report_files/
 reports/validation-report.html
 .DS_Store
 .positai
+
+# metapsy: build chain and source PDFs stay local — only the final CSVs and
+# README are published. build/ holds the three-step pipeline plus the primary
+# study PDFs it recovers change-SDs from.
+metapsy/build/
