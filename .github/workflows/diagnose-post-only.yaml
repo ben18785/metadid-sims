@@ -1,0 +1,135 @@
+name: diagnose post-only bias
+
+# A one-off diagnostic, triggered by hand, for the open "post-only residual
+# bias" issue: roughly +0.02 on a true effect of -0.337 whenever post-only
+# studies dominate the evidence base.
+#
+# Deliberately NOT part of the nightly `simulations` pipeline. It runs ten
+# ad-hoc arms through run_one_rep() directly rather than through targets, so it
+# cannot disturb the scenario matrix, the _targets store or the published
+# report. Results go to the job summary and to an artifact.
+#
+# See diagnostics/post-only-bias.R for what each arm tests and how to read the
+# output table.
+
+on:
+  workflow_dispatch:
+    inputs:
+      metadid_ref:
+        description: "metadid ref to test (branch, tag or SHA)"
+        type: string
+        default: "main"
+      reps:
+        description: "Replications per arm (10 arms; 30 is ~15 min)"
+        type: string
+        default: "30"
+
+# Separate from the `simulations` concurrency group: this job shares no state
+# with the nightly pipeline, so the two can run together.
+concurrency:
+  group: diagnose-post-only
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  PKGCACHE_HTTP_RETRIES: "5"
+  PKGCACHE_HTTP_DELAY: "3"
+
+jobs:
+  diagnose:
+    name: "Post-only bias (metadid@${{ inputs.metadid_ref }}, ${{ inputs.reps }} reps)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout metadid-sims
+        uses: actions/checkout@v4
+        with:
+          path: metadid-sims
+
+      - name: Checkout metadid
+        uses: actions/checkout@v4
+        with:
+          repository: ben18785/metadid
+          ref: ${{ inputs.metadid_ref }}
+          path: metadid
+
+      - name: Record the metadid commit under test
+        id: ref
+        run: |
+          set -euo pipefail
+          sha=$(git -C metadid rev-parse HEAD)
+          echo "Testing metadid at $sha"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+          extra-repositories: "https://mc-stan.org/r-packages/"
+
+      # Same single source of truth for dependencies as sims.yaml, and the same
+      # cache-version so this job reuses that cache rather than building its own.
+      - name: Install R package dependencies
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          working-directory: metadid-sims
+          cache-version: 3
+
+      - name: Cache CmdStan
+        id: cmdstan-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cmdstan
+          key: cmdstan-${{ runner.os }}-v1
+
+      - name: Install CmdStan
+        if: steps.cmdstan-cache.outputs.cache-hit != 'true'
+        # GITHUB_PAT authenticates cmdstanr's release-list API call; see the
+        # note in sims.yaml about the shared per-IP rate limit on runners.
+        env:
+          GITHUB_PAT: ${{ github.token }}
+        run: Rscript -e 'cmdstanr::install_cmdstan(cores = 2)'
+
+      - name: Install metadid from local checkout
+        run: R CMD INSTALL ./metadid
+
+      - name: Run the diagnostic
+        working-directory: metadid-sims
+        env:
+          REPS: ${{ inputs.reps }}
+          # Each fit runs 2 chains in parallel (MCMC_OPTS in R/fit.R), so two
+          # concurrent fits saturate the 4-core runner -- the same arithmetic
+          # the targets pipeline uses for its worker count.
+          DIAG_CORES: "2"
+          OUT_DIR: output
+        run: Rscript diagnostics/post-only-bias.R
+
+      - name: Publish results to the job summary
+        if: always()
+        working-directory: metadid-sims
+        run: |
+          set -euo pipefail
+          {
+            echo "# Post-only bias diagnostic"
+            echo
+            echo "metadid \`${{ steps.ref.outputs.sha }}\` (\`${{ inputs.metadid_ref }}\`)"
+            echo
+            if [ -f output/post-only-bias-diagnostic.md ]; then
+              cat output/post-only-bias-diagnostic.md
+            else
+              echo ":warning: The diagnostic produced no output; see the step log."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: post-only-bias-${{ steps.ref.outputs.sha }}
+          path: |
+            metadid-sims/output/post-only-bias-diagnostic.csv
+            metadid-sims/output/post-only-bias-diagnostic.md
+            metadid-sims/output/post-only-bias-reps.csv
+          if-no-files-found: warn
+          retention-days: 90
