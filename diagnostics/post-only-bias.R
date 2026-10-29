@@ -125,10 +125,53 @@ ARMS <- list(
     fit = list(normalise = FALSE)
   ),
 
+  # fn MUST be switched here: fit_scenario() only forwards time_trend when
+  # fn == "meta_did_general" (R/fit.R), so leaving the default "meta_did" makes
+  # the override a silent no-op. The 3-rep smoke run caught this -- the arm came
+  # back byte-identical to T_trend_m04.
   F_fixed_zero = scenario(
     "time_trend = fixed_zero: bypasses the reparameterisation entirely",
     dgp = list(n_did = N_DID, n_rct = N_RCT, true_trend = -0.04),
-    fit = list(time_trend = "fixed_zero")
+    fit = list(fn = "meta_did_general", time_trend = "fixed_zero")
+  ),
+
+  # Is there a bias floor common to every arm, independent of design? Removing
+  # baseline variation removes all spread in the normalisation denominators, so
+  # both the Jensen correction to the estimand and the precision-weighting
+  # effect (the mechanism that moved Fit 6) vanish. Whatever survives here is
+  # neither of those.
+  Z_bsd0 = scenario(
+    "baseline_sd = 0: no denominator spread, so no weighting floor",
+    dgp = list(n_did = N_DID, n_rct = N_RCT, true_trend = -0.04, baseline_sd = 0)
+  ),
+
+  # The arms above all use the STANDARD metadid DGP. The published +0.02 lives
+  # in X1-X9 and X13-X18, which use the bespoke simulate_imbalance_grid. These
+  # three mirror that generator so we can tell whether the phenomenon is even in
+  # scope here. kappa_true = 0 makes gamma identically zero for the randomised
+  # studies, and the did_gamma_* defaults are zero too, so no study carries any
+  # baseline imbalance -- which is the configuration the open issue says still
+  # shows the bias.
+  B_grid = scenario(
+    "Bespoke imbalance-grid DGP, gamma == 0 everywhere: does +0.02 reproduce?",
+    dgp = list(type = "bespoke", bespoke_fn = "simulate_imbalance_grid",
+               n_did = N_DID, n_rct = N_RCT, n_randomised_did = 0L,
+               n_randomised_rct = N_RCT, kappa_true = 0, true_trend = -0.04)
+  ),
+
+  B_grid_p04 = scenario(
+    "As B_grid with trend +0.04: the sign-flip test on the DGP that shows it",
+    dgp = list(type = "bespoke", bespoke_fn = "simulate_imbalance_grid",
+               n_did = N_DID, n_rct = N_RCT, n_randomised_did = 0L,
+               n_randomised_rct = N_RCT, kappa_true = 0, true_trend = +0.04)
+  ),
+
+  B_grid_bsd0 = scenario(
+    "As B_grid with baseline_sd = 0: bespoke DGP without the weighting floor",
+    dgp = list(type = "bespoke", bespoke_fn = "simulate_imbalance_grid",
+               n_did = N_DID, n_rct = N_RCT, n_randomised_did = 0L,
+               n_randomised_rct = N_RCT, kappa_true = 0, true_trend = -0.04,
+               baseline_sd = 0)
   ),
 
   C_did_only = scenario(
@@ -280,6 +323,29 @@ md <- c(
   "  mechanism is already confirmed to exist (it is what moved Fit 6 and the",
   "  X1-X6 arms after the delta-method patch), but at baseline_sd = 0.05 it",
   "  accounts for only about +0.004 of the roughly +0.02 observed.",
+  "",
+  "### Is there a floor, and is the phenomenon even in scope?",
+  "",
+  "`C_did_only` and `Z_bsd0` test for a bias common to every arm. If all arms",
+  "sit at the same small positive value, that is a FLOOR rather than a post-only",
+  "effect, and `Z_bsd0` says what it is: with no spread in the denominators,",
+  "both the Jensen correction and the weighting effect are gone, so anything",
+  "left over is a third thing.",
+  "",
+  "`B_grid*` mirror simulate_imbalance_grid, the generator the published +0.02",
+  "arms actually use, with gamma identically zero throughout. They answer a",
+  "prior question: does the standard DGP reproduce the phenomenon at all?",
+  "",
+  "* **B_grid near +0.02 while the standard-DGP arms sit near the floor** -> the",
+  "  bias is specific to that generator, and the whole trend/tau_beta sweep above",
+  "  was run on data that never exhibited it. Rebuild the sweep on the bespoke",
+  "  DGP before concluding anything from it.",
+  "* **B_grid at the same floor as everything else** -> the +0.02 in the report",
+  "  comes from something those scenarios add beyond the generator (non-zero",
+  "  gamma, randomisation labels, kappa_true > 0, cluster settings), and the next",
+  "  step is to switch those on one at a time.",
+  "* **B_grid_p04 flips sign while B_grid does not** -> the conversion is",
+  "  implicated after all, but only under this generator.",
   "",
   sprintf("Convergence: worst %%Rhat>1.05 = %.2f, worst mean divergences = %.1f.",
           max(summary_tbl$pct_rhat_bad, na.rm = TRUE),
