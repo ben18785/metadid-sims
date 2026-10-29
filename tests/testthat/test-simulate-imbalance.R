@@ -101,6 +101,53 @@ test_that("pre-post studies start at the latent control baseline plus gamma", {
   expect_equal(mean(d$mean_pre_treatment), 0.45 + 0.08, tolerance = 0.01)
 })
 
+# --- The post-only time trend ------------------------------------------------
+# These three guard the defect that produced the "post-only residual bias" in
+# X1-X9 and X13-X18: the RCT branch never drew `betas`, so a post-only study's
+# arms sat at the latent PRE-treatment level. Its normalised contrast was then
+# (gamma + theta)/b, already on the alpha scale that DiD studies use, and
+# metadid's alpha + beta -> alpha conversion multiplied in a spurious
+# (1 + beta_tilde). The pooled effect came out biased by theta_tilde *
+# beta_tilde -- about +0.02 at the default trend, flipping sign with it, and
+# invisible to every diagnostic aimed at the model rather than the generator.
+
+test_that("a post-only study's arms are observed after the trend has acted", {
+  d <- sim_summary(n_did = 0L, n_rct = 400L, baseline_sd = 0, sigma_trend = 0,
+                   baseline_mean = 0.45, true_trend = -0.04)
+  d <- d[d$design == "rct", ]
+  # The control arm has had no treatment but has had the trend.
+  expect_equal(mean(d$mean_post_control), 0.45 - 0.04, tolerance = 0.005)
+})
+
+test_that("a post-only study's arm contrast is free of the trend", {
+  # gamma == 0 for every study, so the contrast must be theta alone whatever
+  # the trend does. This is the complement of the test above: the trend has to
+  # be present in the LEVELS and absent from the CONTRAST.
+  contrast <- function(trend) {
+    d <- sim_summary(n_did = 0L, n_rct = 400L, baseline_sd = 0, sigma_trend = 0,
+                     n_randomised_rct = 400L, kappa_true = 0,
+                     true_effect = -0.15, sigma_effect = 0, true_trend = trend)
+    d <- d[d$design == "rct", ]
+    mean(d$mean_post_treatment - d$mean_post_control)
+  }
+  expect_equal(contrast(-0.04), -0.15, tolerance = 0.005)
+  expect_equal(contrast(+0.04), -0.15, tolerance = 0.005)
+})
+
+test_that("post-only and DiD studies share the post-period scale", {
+  # The invariant whose violation caused the bias: a post-only study's control
+  # mean estimates the same quantity as a DiD study's control POST mean. If
+  # these drift apart, the two designs are being scored on different scales and
+  # any cross-design pooling inherits the difference as bias.
+  common <- list(baseline_sd = 0, sigma_trend = 0, baseline_mean = 0.45,
+                 true_trend = -0.04)
+  dd <- do.call(sim_summary, c(common, list(n_did = 400L, n_rct = 0L)))
+  rr <- do.call(sim_summary, c(common, list(n_did = 0L,   n_rct = 400L)))
+  expect_equal(mean(rr$mean_post_control[rr$design == "rct"]),
+               mean(dd$mean_post_control[dd$design == "did"]),
+               tolerance = 0.005)
+})
+
 test_that("both data formats describe the same studies", {
   mk <- function(fmt) {
     cfg <- scenario("t",

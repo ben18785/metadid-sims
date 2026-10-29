@@ -73,6 +73,7 @@ genuine   <- flagged |> filter(!expected)
 expected  <- flagged |> filter(expected)
 contrasts <- check_contrasts(all_agg)
 open_issues <- known_open_issues()
+resolved    <- resolved_issues()
 ```
 
 **`r nrow(all_agg |> distinct(scenario_id))`** scenarios evaluated, at up to
@@ -88,15 +89,20 @@ excluded from the counts below and reported for the paper panels instead.
 
 ### Known open issues
 
-These are real, stated, and unfixed. They are listed once here rather than as
-dozens of per-arm flags (which buries them) or registered as expected-by-design
-(which hides them).
+`r if (nrow(open_issues) > 0) "These are real, stated, and unfixed. They are listed once here rather than as dozens of per-arm flags (which buries them) or registered as expected-by-design (which hides them)." else "**None.** Issues that were open and have since been explained are listed below, with their cause -- a report that simply stopped mentioning one would leave you unable to tell a fix from an oversight."`
 
 ```{r open-issues}
 #| eval: !expr nrow(open_issues) > 0
 open_issues |>
   select(Issue = id, Affects = affects, Detail = summary) |>
   kable()
+```
+
+```{r resolved-issues}
+#| eval: !expr nrow(resolved) > 0
+resolved |>
+  select(Resolved = id, Affected = affects, Cause = cause, Fix = fix) |>
+  kable(caption = "Previously open issues, with the cause that was found")
 ```
 
 ### Category X: do the comparative scenarios order their arms as claimed?

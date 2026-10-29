@@ -2651,7 +2651,7 @@ scenario_expectations <- function() {
     # Normalisation divisor: dividing by the OBSERVED control baseline drops
     # that divisor's sampling variance from the baseline contrast, which is
     # expected to inflate tau_gamma. These scenarios measure the size of it.
-    "X20", "normalised",      "baseline_difference_sd", "Normalisation treats the observed control baseline as exact, dropping its sampling variance from the baseline contrast — tau_gamma inflation is what this scenario measures",
+    "X20", "normalised",      "baseline_difference_sd", "Normalisation used to treat the observed control baseline as exact, dropping its sampling variance from the baseline contrast; metadid's delta-method correction fixed that and this scenario is now the regression test. tau_gamma coverage stays at 0 because its true value is 0 — a boundary parameter, not a calibration failure",
     "X21", "normalised",      "baseline_difference_sd", "As X20 at n = 100/arm",
     "X22", "normalised",      "baseline_difference_sd", "As X20 at n = 400/arm",
     "H1", "naive",            NA,                     "Naive arm — misspecified by design",
@@ -2779,14 +2779,15 @@ scenario_contrasts <- function() {
     # than post-only imbalance, which is exactly when borrowing mu_gamma hurts.
     "B6", "treatment_effect_mean",    "zero_mean",     "full",
       "zero-mean gamma beats a shared population when DiD imbalance exceeds post-only imbalance (n = 25)",
-    # Normalisation divides by the OBSERVED control baseline and then treats it
-    # as exact, which should inflate tau_gamma relative to the raw scale.
-    "X20", "baseline_difference_sd",   "raw",           "normalised",
-      "normalisation inflates tau_gamma (n = 30/arm)",
-    "X21", "baseline_difference_sd",   "raw",           "normalised",
-      "normalisation inflates tau_gamma (n = 100/arm)",
-    "X22", "baseline_difference_sd",   "raw",           "normalised",
-      "normalisation inflates tau_gamma (n = 400/arm)",
+    # X20-X22 used to claim that normalisation inflates tau_gamma, because it
+    # divided by the OBSERVED control baseline and then treated it as exact.
+    # metadid's delta-method correction fixed that, and the scenarios now show
+    # raw and normalised agreeing: tau_gamma bias 0.047 -> 0.031 at n = 30,
+    # 0.023 -> 0.014 at n = 100 and 0.012 -> 0.008 at n = 400, against raw arms
+    # of 0.031, 0.013 and 0.008. A directional claim between two arms that now
+    # coincide is decided by Monte Carlo noise, so it reported a spurious "NO"
+    # about a third of the time. The scenarios stay -- they are the regression
+    # test for that fix -- but they no longer assert an ordering.
     # Pre-post studies normalise by their own treatment-arm baseline, so a
     # one-sided gamma puts them on a different scale from DiD and RCT.
     "X25", "treatment_effect_mean",    "raw",           "normalised",
@@ -2831,20 +2832,47 @@ check_contrasts <- function(agg) {
 # Listed once here rather than surfacing as dozens of per-arm flags (which
 # buries them) or being registered as expected-by-design (which hides them).
 known_open_issues <- function() {
+  # Nothing currently open. post-only-residual-bias lived here until it was
+  # traced to this repo's own generator rather than to metadid -- see
+  # resolved_issues() below. Zero rows is a real state, not a placeholder: the
+  # report prints "none" and the resolved table explains why numbers moved.
+  tibble::tibble(
+    id      = character(),
+    affects = character(),
+    summary = character()
+  )
+}
+
+#' Issues that were open and have since been explained
+#'
+#' A nightly report that silently stops mentioning a known bias leaves readers
+#' unable to tell a fix from an oversight, and unable to explain why a number
+#' moved between runs. Resolved entries stay here with their cause.
+resolved_issues <- function() {
   tibble::tribble(
-    ~id, ~affects, ~summary,
+    ~id, ~affects, ~cause, ~fix,
     "post-only-residual-bias",
     "X1-X9, X13-X18 (any composition dominated by post-only studies)",
     paste(
-      "Every arm carries a positive bias of roughly +0.02 on a true effect of",
-      "-0.337 (about 7%) whenever post-only studies dominate the evidence base,",
-      "including arms whose post-only studies have gamma identically zero. It is",
-      "absent from DiD-only scenarios (X10-X12, |t| <= 1) and from category A",
-      "(bias ~0.003, coverage 0.84-0.96), so it is not the transport mechanism",
-      "and not a general miscalibration. Leading suspicion is the post-only",
-      "normalisation denominator: RCTs divide by mean_post_control (b + beta)",
-      "while DiD divide by mean_pre_control (b), making this the time-trend",
-      "analogue of the pre-post scale mismatch in X24-X27. Not investigated."
+      "A defect in THIS repo, not in metadid. The post-only branch of",
+      "simulate_imbalance_grid never drew `betas`, so a post-only study's arms",
+      "sat at the latent pre-treatment level: control at b rather than",
+      "b + beta. Its normalised contrast was therefore (gamma + theta)/b,",
+      "already on the alpha scale that DiD studies use, and metadid correctly",
+      "applied its alpha + beta -> alpha conversion on top, multiplying in a",
+      "spurious (1 + beta_tilde). The pooled effect was biased by",
+      "theta_tilde * beta_tilde: +0.030 at full strength, about +0.02 after",
+      "dilution by the DiD studies. diagnostics/post-only-bias.R at 20",
+      "replications settled it: +0.0216 at trend -0.04, -0.0159 at +0.04 (the",
+      "sign flip no other mechanism predicts), +0.0173 with baseline_sd = 0 (so",
+      "not precision weighting), and within one Monte Carlo SE of zero across",
+      "every arm of the standard DGP, which applies the trend correctly."
+    ),
+    paste(
+      "The trend is now applied to post-only arms. Three invariants are tested",
+      "in test-simulate-imbalance.R: the trend must appear in a post-only",
+      "study's arm levels, must cancel from its arm contrast, and a post-only",
+      "control mean must estimate the same quantity as a DiD control post mean."
     )
   )
 }
