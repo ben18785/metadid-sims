@@ -59,13 +59,23 @@ test_that("a missing arm yields NA, not a silent pass", {
   expect_true(is.na(out$holds[out$scenario_id == "X1"]))
 })
 
-test_that("known open issues are stated, not empty placeholders", {
+test_that("any open issue is stated, not an empty placeholder", {
   iss <- known_open_issues()
-  expect_true(nrow(iss) >= 1)
+  # Zero rows is legitimate; a row with blank fields is not.
   expect_true(all(nzchar(iss$id) & nzchar(iss$affects) & nzchar(iss$summary)))
-  # The post-only residual bias is the one finding this run left unexplained;
-  # it must not quietly disappear into the expectations registry.
-  expect_true("post-only-residual-bias" %in% iss$id)
+  expect_setequal(names(iss), c("id", "affects", "summary"))
+})
+
+test_that("the post-only residual bias is recorded as resolved, not hidden", {
+  # It was traced to this repo's own generator: the post-only branch of
+  # simulate_imbalance_grid omitted the time trend, so metadid's alpha + beta
+  # -> alpha conversion was applied to data already on the alpha scale. The
+  # guard that matters is unchanged -- a finding must not vanish into the
+  # expectations registry, which is where real defects go to be forgotten.
+  res <- resolved_issues()
+  expect_true("post-only-residual-bias" %in% res$id)
+  expect_true(all(nzchar(res$cause) & nzchar(res$fix)))
+  expect_false("post-only-residual-bias" %in% known_open_issues()$id)
   reg <- scenario_expectations()
   expect_false(any(grepl("post-only residual", reg$reason, ignore.case = TRUE)))
 })
