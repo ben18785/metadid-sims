@@ -1459,14 +1459,26 @@ simulate_imbalance_grid <- function(config) {
 
   if (dgp$n_rct > 0) {
     thetas    <- stats::rnorm(dgp$n_rct, dgp$true_effect, dgp$sigma_effect)
+    # A post-only study observes its arms AFTER the trend has acted, so both
+    # arm means carry beta_i. Omitting it put the control arm at the latent
+    # PRE-treatment level b, which made the normalised contrast (gamma + theta)/b
+    # -- already on the alpha scale that DiD studies use. metadid then correctly
+    # applied its alpha + beta -> alpha conversion, multiplying in a spurious
+    # (1 + beta_tilde) and biasing the pooled effect by theta_tilde * beta_tilde
+    # (about +0.02 at the default trend, flipping sign with it). That was the
+    # "post-only residual bias" in X1-X9 and X13-X18: a defect in this
+    # generator, not in the model it was scoring.
+    betas     <- stats::rnorm(dgp$n_rct, dgp$true_trend,  dgp$sigma_trend)
     baselines <- stats::rnorm(dgp$n_rct, dgp$baseline_mean, dgp$baseline_sd)
     rct_raw <- lapply(seq_len(dgp$n_rct), function(i) {
       b <- baselines[i]; g <- spec_rct$gamma[i]
       m   <- if (spec_rct$clustered[i]) dgp$cluster_size else NA
       icc <- if (spec_rct$clustered[i]) dgp$icc          else NA
       list(
-        ctrl = .draw_arm_single(n_c, b,                  dgp$within_sd, m, icc),
-        trt  = .draw_arm_single(n_t, b + g + thetas[i],  dgp$within_sd, m, icc)
+        ctrl = .draw_arm_single(n_c, b + betas[i],
+                                dgp$within_sd, m, icc),
+        trt  = .draw_arm_single(n_t, b + g + betas[i] + thetas[i],
+                                dgp$within_sd, m, icc)
       )
     })
   }
