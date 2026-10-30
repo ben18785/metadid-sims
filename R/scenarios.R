@@ -2615,6 +2615,14 @@ scenario_expectations <- function() {
     "B5", "naive",            NA,                     "Naive arm ignores RCT baseline imbalance — biased by design",
     "B5", "zero_mean",        NA,                     "Same identification limit as the full arm: post-only imbalance is not per-study identifiable, and pinning mu_gamma does not create information that is not there. All three arms under-cover comparably (0.12 / 0.04 / 0.08)",
     "B6", "full",             NA,                     "Shared baseline-difference hierarchy is dominated by the larger DiD imbalance and mis-applies it to RCT — bias expected by design (see category X, which isolates this)",
+    # The sign-flipped-imbalance arms fit a shared gamma population to studies
+    # whose imbalance has no common direction, which is the misspecification
+    # the scenario exists to show. delta_rct and mu_gamma are near-aliased for
+    # post-only studies (see X19), so the arm samples a ridge: coverage and bias
+    # stay fine (0.80-0.87 and under 0.01) while R-hat does not. The geometry is
+    # the finding, not a defect.
+    "X5", "shared",           NA,                     "Shared gamma population fitted to sign-flipped imbalance: delta_rct and mu_gamma are near-aliased for post-only studies, so this arm samples a ridge — poor R-hat is the demonstrated geometry, with coverage and bias unaffected",
+    "X6", "shared",           NA,                     "As X5 at a larger sign-flipped imbalance",
     "B6", "naive",            NA,                     "Naive arm ignores baseline imbalance — biased by design",
     # --- Category X: randomisation and baseline imbalance -------------------
     # The `shared` arm IS the finding: one gamma population with an estimated
