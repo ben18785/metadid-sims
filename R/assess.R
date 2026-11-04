@@ -192,6 +192,43 @@ aggregate_scenario <- function(results) {
 }
 
 # ===========================================================================
+# Coverage flagging
+# ===========================================================================
+
+#' Is an observed coverage significantly below nominal?
+#'
+#' A one-sided exact binomial test of H0: coverage >= `nominal`, flagging when
+#' p < `alpha`. This replaces a fixed threshold, which could not work across the
+#' replication counts the scenarios run at: at n = 15 the Monte Carlo SE of an
+#' estimated coverage is 0.078 and at n = 50 it is 0.042, so one cut-off is
+#' either too noisy at the low end or too blind at the high end. A flat 0.80
+#' flagged a perfectly calibrated scenario 5.6% of the time at n = 15, while a
+#' flat 0.70 would have caught a genuinely 0.80-covering scenario only 3% of the
+#' time at n = 50.
+#'
+#' The test adapts instead. At `alpha = 0.025` it flags coverage at or below
+#' 0.667 (n = 15), 0.720 (n = 25), 0.778 (n = 45) and 0.800 (n = 50). Because
+#' coverage is discrete, 0.025 and 0.05 give the same threshold at n = 15 and
+#' n = 50 and differ by one replicate at n = 25 -- so the conservatism is nearly
+#' free, which is why 0.025 is the default.
+#'
+#' @param coverage Observed empirical coverage.
+#' @param n_reps Replications it was computed from.
+#' @param nominal Nominal coverage of the interval (0.90 here: lo/hi are the 5%
+#'   and 95% posterior quantiles).
+#' @param alpha One-sided significance level.
+#' @return Logical vector.
+coverage_flag <- function(coverage, n_reps, nominal = 0.90, alpha = 0.025) {
+  ok <- !is.na(coverage) & !is.na(n_reps) & n_reps > 0
+  out <- rep(FALSE, length(coverage))
+  # Number of covering replicates, then the probability of seeing that few or
+  # fewer if coverage really were nominal.
+  k <- round(coverage[ok] * n_reps[ok])
+  out[ok] <- stats::pbinom(k, size = n_reps[ok], prob = nominal) < alpha
+  out
+}
+
+# ===========================================================================
 # Paired RMSE contrast between two model arms
 # ===========================================================================
 
