@@ -39,4 +39,5 @@ Imports:
     tidyselect,
     withr
 Suggests:
+    codetools,
     testthat (>= 3.0.0)

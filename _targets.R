@@ -781,6 +781,11 @@ list(
   # ---- Validation report ----
   tarchetypes::tar_quarto(
     report,
-    path = "reports/validation-report.qmd"
+    path = "reports/validation-report.qmd",
+    # tar_quarto() defaults to quiet = TRUE, which discards everything the
+    # render says and leaves only "Error returned by quarto CLI" -- an exit
+    # code, at the end of a three-hour run, for what was really "could not
+    # find function coverage_flag". The render log is worth the noise.
+    quiet = FALSE
   )
 )

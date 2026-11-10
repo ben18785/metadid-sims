@@ -2,6 +2,79 @@
 # wrong: counting scenarios the reader cannot inspect, and applying a
 # calibration test to scenarios that were built to fail.
 
+# ---------------------------------------------------------------------------
+# The report's session is not the pipeline's session
+# ---------------------------------------------------------------------------
+#
+# _targets.R sources all nine R/ files, so every target can call anything. The
+# report does not inherit that: Quarto renders it in a fresh session where it
+# attaches its own packages and sources its own subset of R/. A function the
+# whole pipeline can see may therefore be invisible to the report, and nothing
+# says so until the render runs -- which happens once, at the end of a
+# multi-hour simulation, and reports only "Error returned by quarto CLI".
+#
+# That is how a call to coverage_flag() (defined in R/assess.R, which the
+# report did not source) reached main. This resolves the report's calls
+# statically, by parsing, so it costs milliseconds and runs in unit-tests.yaml
+# instead of at the end of sims.yaml.
+.report_chunk_code <- function(path) {
+  lines <- readLines(path, warn = FALSE)
+  opens <- grep("^```\\{r", lines)
+  closes <- grep("^```[[:space:]]*$", lines)
+  unlist(lapply(opens, function(s) {
+    e <- closes[closes > s][1]
+    if (is.na(e) || e <= s + 1L) return(character())
+    body <- lines[(s + 1L):(e - 1L)]
+    body[!grepl("^#\\|", body)]          # chunk options, not R code
+  }))
+}
+
+# Top-level assignments in a file, without evaluating it. Sourcing R/plots.R
+# would attach ggplot2 and gridExtra for a test that needs neither.
+.top_level_names <- function(file) {
+  nm <- vapply(as.list(parse(file)), function(e) {
+    if (is.call(e) && as.character(e[[1]])[1] %in% c("<-", "=", "<<-") &&
+        is.name(e[[2]])) as.character(e[[2]]) else NA_character_
+  }, character(1))
+  nm[!is.na(nm)]
+}
+
+test_that("the report can see every function it calls", {
+  skip_if_not_installed("codetools")
+
+  exprs <- as.list(parse(text = paste(
+    .report_chunk_code(file.path(.sims_root, "reports/validation-report.qmd")),
+    collapse = "\n")))
+  heads <- function(nm) Filter(
+    function(e) is.call(e) && identical(as.character(e[[1]])[1], nm), exprs)
+
+  libs <- vapply(heads("library"), function(e) as.character(e[[2]]), character(1))
+  srcs <- vapply(heads("tar_source"),
+                 function(e) if (length(e) > 1L) as.character(e[[2]]) else "R",
+                 character(1))
+  expect_gt(length(libs), 0L)
+  expect_gt(length(srcs), 0L)
+  for (l in libs) skip_if_not_installed(l)
+
+  files <- unlist(lapply(file.path(.sims_root, srcs), function(p) {
+    if (dir.exists(p)) list.files(p, "[.]R$", full.names = TRUE) else p
+  }))
+  visible <- unique(c(
+    unlist(lapply(files, .top_level_names)),
+    # Attached by the report, plus what R attaches for you anyway.
+    unlist(lapply(c(libs, "base", "stats", "utils", "graphics", "grDevices",
+                    "methods"), getNamespaceExports))
+  ))
+
+  wrapped <- eval(call("function", NULL,
+                       as.call(c(quote(`{`), exprs))))
+  called <- codetools::findGlobals(wrapped, merge = FALSE)$functions
+  unresolved <- setdiff(called, visible)
+  expect_equal(unresolved, character(0),
+               info = paste("the report calls these but cannot see them:",
+                            paste(unresolved, collapse = ", ")))
+})
+
 test_that("validation and figure-sweep categories partition the scenarios", {
   cats <- sort(unique(substr(names(SCENARIO_CONFIGS), 1L, 1L)))
   expect_equal(sort(c(VALIDATION_CATEGORIES, FIGURE_SWEEP_CATEGORIES)), cats)
