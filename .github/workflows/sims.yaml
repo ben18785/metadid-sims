@@ -312,47 +312,11 @@ jobs:
 
       - name: Merge _targets stores
         working-directory: metadid-sims
-        run: |
-          set -euo pipefail
-          mkdir -p _targets/meta _targets/objects
-          # Copy every category's object files (target names are unique per
-          # category, so cross-category collisions only happen on shared
-          # dependencies like `metadid_src`, which all carry the same hash).
-          for d in ../artifacts/targets-store-*; do
-            if [ -d "$d/objects" ]; then
-              cp -rn "$d"/objects/. _targets/objects/ || true
-            fi
-          done
-          # Merge meta files: keep one header line, then dedupe rows by
-          # the first column (target name).
-          first=$(ls -1 ../artifacts/targets-store-*/meta/meta 2>/dev/null | head -1)
-          if [ -z "$first" ]; then
-            echo "::error::No meta files found in downloaded artifacts"
-            exit 1
-          fi
-          head -n 1 "$first" > _targets/meta/meta
-          for f in ../artifacts/targets-store-*/meta/meta; do
-            tail -n +2 "$f"
-          done | awk -F'|' '!seen[$1]++' >> _targets/meta/meta
-          echo "Merged store contains $(wc -l < _targets/meta/meta) meta rows and $(ls _targets/objects | wc -l) object files."
+        run: bash scripts/merge-targets-store.sh ../artifacts _targets
 
       - name: Build cross-category targets and render report
         working-directory: metadid-sims
-        run: |
-          Rscript -e '
-            library(targets)
-            tar_make(names = c(
-              "scenario_lookup_tbl",
-              "diag_plot_A", "diag_plot_B", "diag_plot_C", "diag_plot_D",
-              "diag_plot_E", "diag_plot_F", "diag_plot_G", "diag_plot_H",
-              "diag_plot_I", "diag_plot_J", "diag_plot_K", "diag_plot_L",
-              "diag_plot_M", "diag_plot_N",
-              "all_agg", "all_rep",
-              "export_agg_csv", "export_rep_rds", "archive_results",
-              "scenario_settings_csv", "figure_data_csv",
-              "report"
-            ))
-          '
+        run: Rscript scripts/build-report.R
 
       - name: Upload validation report and outputs
         uses: actions/upload-artifact@v4

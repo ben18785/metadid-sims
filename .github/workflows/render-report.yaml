@@ -1,0 +1,110 @@
+name: render report only
+
+# Re-render the validation report from a PREVIOUS simulations run's uploaded
+# store slices, without re-simulating anything.
+#
+# The report is the last target of a three-hour run, so a mistake in the qmd --
+# a missing tar_source(), a renamed column, a typo in a table -- costs three
+# hours to discover and another three to confirm the fix. This costs about ten
+# minutes and can be run against the slices of a run that already failed.
+#
+# Give it the run ID of a simulations run (the number in its URL) and the
+# metadid SHA that run used, which its own log prints as METADID_SHA. If the
+# metadid ref does not match, `metadid_src` rehashes, every scenario target
+# goes out of date, and tar_make will try to re-run them -- CmdStan is
+# deliberately not installed here, so that fails immediately and visibly
+# rather than quietly re-simulating for six hours.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "simulations run ID to take targets-store-* artifacts from"
+        required: true
+      metadid_ref:
+        description: "metadid SHA or ref that run used (METADID_SHA in its log)"
+        required: true
+        default: main
+
+jobs:
+  render:
+    name: Render report from run ${{ inputs.run_id }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout metadid-sims
+        uses: actions/checkout@v4
+        with:
+          path: metadid-sims
+
+      - name: Checkout metadid
+        uses: actions/checkout@v4
+        with:
+          repository: ben18785/metadid
+          ref: ${{ inputs.metadid_ref }}
+          path: metadid
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+          extra-repositories: "https://mc-stan.org/r-packages/"
+
+      - uses: r-lib/actions/setup-pandoc@v2
+
+      - uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: Install R package dependencies
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          working-directory: metadid-sims
+          cache-version: 3
+
+      # --no-libs skips src/install.libs.R, which compiles the Stan models and
+      # therefore needs CmdStan. Nothing here fits anything: the report only
+      # reads stored results. See the header on what happens if a refit is
+      # attempted anyway.
+      - name: Install metadid from local checkout
+        run: R CMD INSTALL --no-libs --no-byte-compile ./metadid
+
+      - name: Restore prior archive.csv from gh-pages (if present)
+        working-directory: metadid-sims
+        run: |
+          set -euo pipefail
+          mkdir -p output
+          url="https://raw.githubusercontent.com/${{ github.repository }}/gh-pages/archive.csv"
+          if curl -fsSL -o output/archive.csv "$url"; then
+            echo "Restored prior archive.csv ($(wc -l < output/archive.csv) lines incl. header)"
+          else
+            echo "No prior archive.csv on gh-pages; starting fresh"
+            rm -f output/archive.csv
+          fi
+
+      - name: Download _targets store slices from run ${{ inputs.run_id }}
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: targets-store-*
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Merge _targets stores
+        working-directory: metadid-sims
+        run: bash scripts/merge-targets-store.sh ../artifacts _targets
+
+      - name: Build cross-category targets and render report
+        working-directory: metadid-sims
+        run: Rscript scripts/build-report.R
+
+      # Not published to gh-pages: this is a check on the render, not a run of
+      # record. Download it from the run's artifacts to read it.
+      - name: Upload validation report
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-report-rerender
+          path: |
+            metadid-sims/reports/validation-report.html
+            metadid-sims/output/aggregated_results.csv
+            metadid-sims/output/scenario_settings.csv
+            metadid-sims/output/figure_panels.csv
+          if-no-files-found: warn
+          retention-days: 14
