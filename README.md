@@ -9,7 +9,7 @@ Simulation-based validation study for the [metadid](https://github.com/ben18785/
 metadid depends on [cmdstanr](https://mc-stan.org/cmdstanr/) and [instantiate](https://CRAN.R-project.org/package=instantiate), which compile Stan models at package install time. Install them first if you haven't already:
 
 ```r
-install.packages("cmdstanr", repos = c("https://mc-stan.org/r-packages/", getOption("repos")))
+install.packages("cmdstanr", repos = c("https://stan-dev.r-universe.dev/", getOption("repos")))
 cmdstanr::install_cmdstan()
 
 install.packages("instantiate")
